@@ -1,5 +1,11 @@
 from .config import Config
 from .utils import load_json
+from .features import read_wav, get_mfb, get_bert_embedding, get_w2v2
+
+# Iterable PyTorch dataset instance
+class DatasetInstance(torch.utils.data.Dataset):
+    def __init__(self, dataset_constructor, keys_to_use):
+        
 
 # This class loads all the relevant data and then returns iterable datasets for each 
 # data split
@@ -34,7 +40,7 @@ class DatasetConstructor:
         self.prepare_labels()
 
         if self.filter_fn is not None:
-            pass # Filter the labels based on the filter_fn
+            self.labels = {key: self.labels[key] for key in list(self.labels.keys()) if filter_fn(key)} # Filter the labels based on the filter_fn
 
         # Features will be added to the labels file
         self.generate_features()
@@ -95,13 +101,17 @@ class DatasetConstructor:
         num_workers = 8
         pool = mp_thread.Pool(num_workers)
 
-        for _ in tqdm(pool.imap_unordered(self.read_audio_features, self.wav_keys_to_use.keys()), total=len(self.wav_keys_to_use.keys()), desc='Saving audio features'):
+        # Define some values that we want to track about the wav files
+        self.wav_rms = {} # Used for SNR
+        self.wav_lengths = {}
+
+        for _ in tqdm(pool.imap_unordered(self.save_speech_features, self.wav_keys_to_use.keys()), total=len(self.wav_keys_to_use.keys()), desc='Saving audio features'):
             pass
         
         pool.close()
         pool.join()
 
-    def read_audio_features(self, wav_key):
+    def save_speech_features(self, wav_key):
         # First check if the wav key has a label
         if not self.create_new_labels and wav_key not in self.labels:
             del self.wav_keys_to_use[wav_key]
@@ -114,6 +124,7 @@ class DatasetConstructor:
             del self.wav_keys_to_use[wav_key]
             if wav_key in self.labels:
                 del self.labels[wav_key]
+            return # Wav/label has been deleted and is invalid
 
         # Valid wav key
         # create label if necessary
@@ -128,6 +139,12 @@ class DatasetConstructor:
             self.labels[wav_key]['audio'] = get_w2v2(y, sr, w2v2_model=self.config['audio_feature_type'])
         else:
             raise IOError(f"Uknown audio feature type {self.config['audio_feature_type']} in data_config.yaml")
+
+        # Now that we have the valid wav key, we should store the additional wav information
+        # Calculate rms for snr calculations
+        rms = np.mean(librosa.feature.rms(y=y))
+        self.wav_rms[wav_key] = rms
+        self.wav_lengths[wav_key] = duration
 
         # Now get text features
         # if the labels file existed then we just use the loaded transcripts

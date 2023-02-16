@@ -7,3 +7,12 @@ max_len: 15 # Maximum audio length (seconds)
 ASR:
   permit_ASR: False # Should ASR be allowed when transcripts are missing
   azure_secrets_path: '' # If so, provide path to azure secrets file for ASR
+SR: 16000
+mfb_settings:
+  n_fft: 2048
+  n_mels: 40
+  hop_length: 160
+  fmin: 0
+  fmax: None
+  clamp_val: 3.0
+  clamp_values: True
