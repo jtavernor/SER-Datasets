@@ -1,0 +1,121 @@
+from dataset_constructor import DatasetConstructor
+from config import Config
+from glob import glob
+import os
+import re
+
+class IEMOCAPDatasetConstructor(DatasetConstructor):
+    def __init__(self, filter_fn=None, dataset_save_location=None):
+        self.iemocap_directory = Config()['iemocap_directory']
+        super().__init__(0, filter_fn, dataset_save_location)
+
+    def read_labels(self):
+        label_file = os.path.join(self.iemocap_directory, 'IEMOCAP_EmoEvaluation.txt')
+        get_evaluator_scores = re.compile(r'.*val\s+([1-5]\.?\d?);\s+act\s+([1-5]\.?\d?);\s+dom\s+([1-5]\.?\d?);.*')
+        label_info = {}
+        labels = {}
+        with open(label_file, 'r') as file:
+            section = []
+            for line in file:
+                # Skip the first line
+                if 'TURN_NAME' in line: continue
+                line = line.rstrip()
+                if line == '' and len(section):
+                    # Empty line - end of this section, store in the label info
+                    session_id = section[0].split('\t')[1]
+                    label_info[session_id] = section
+                    section = []
+                elif line != '':
+                    section.append(line)
+        
+        # We now just need to process each of the sections and also load the transcript for each id
+        for label_id in label_info:
+            if label_id in labels:
+                raise IOError(f'Multiple labels for the same speech {label_id}')
+            labels[label_id] = {}
+            for line in label_info[label_id]:
+                # First line contains averaged labels
+                if line.startswith('[') and line.endswith(']'):
+                    cat_lbl = line.split("\t")[2]
+                    val_lbl = float(line.split("\t")[3][1:-1].split(", ")[0])
+                    act_lbl = float(line.split("\t")[3][1:-1].split(", ")[1])
+                    dom_lbl = float(line.split("\t")[3][1:-1].split(", ")[2])
+                    labels[label_id]['act'] = act_lbl
+                    labels[label_id]['val'] = val_lbl
+                    # labels[label_id]['dom'] = dom_lbl
+                    labels[label_id]['gender'] = re.match(r'.*(?P<gender>[FM])\d+$', label_id).group('gender')
+                elif line.startswith('A-E'):
+                    # Attribute perception of other evaluator
+                    pass # For now don't use the individual evaluator scores
+                elif line.startswith('A-F') or line.startswith('A-M'):
+                    # Attribute perception of self evaluator
+                    if 'self-report' in labels[label_id]:
+                        raise IOError(f'Found multiple self-report scores for {label_id}.')
+                    regex_match = get_evaluator_scores.match(line)
+                    if regex_match:
+                        labels[label_id]['self-report-val'] = float(regex_match.group(1))
+                        labels[label_id]['self-report-act'] = float(regex_match.group(2))
+                        # labels[label_id]['self-report-dom'] = float(regex_match.group(3))
+                    else:
+                        # Bad label that is not in the range 1-5 or is just blank 
+                        print(f'Bad label {label_id}: {line}')
+                        del labels[label_id]
+                elif line.startswith('C-'):
+                    # All categorical based evaluations
+                    pass
+                else:
+                    raise IOError('Unknown line in IEMOCAP label file - cannot process:', line)
+
+        # Now read the transcripts
+        transcript_files = glob(os.path.join(self.iemocap_directory, '**/dialog/transcriptions/*.txt'))
+        for transcript_file in transcript_files:
+            with open(transcript_file, 'r') as file:
+                for line in file:
+                    line = line.rstrip()
+                    split_line = line.split()
+                    utt_id, transcript = split_line[0], ' '.join(split_line[2:])
+                    if utt_id in labels:
+                        labels[utt_id]['transcript'] = transcript
+                    else:
+                        print(f'No label found for transcript {utt_id} in file {transcript_file}')
+
+        return labels
+
+    def get_wavs(self):
+        all_wavs = glob(os.path.join(self.iemocap_directory, '**/sentences/wav/**/*.wav'))
+        label_id_to_wav = {
+            wav_path.split('/')[-1].replace('.wav',''): wav_path for wav_path in all_wavs
+        }
+        return label_id_to_wav
+
+    def get_dataset_splits(self, data_split_type):
+        split_type = super().get_dataset_splits(data_split_type)
+        all_keys = list(self.labels.keys())
+        if type(split_type) == dict:
+            return split_type
+        elif type(split_type) == str:
+            # Now we want to define custom data splits 
+            if split_type == 'speaker-independent':
+                # Training is session 1-3
+                # Validation is session 4
+                # Testing is session 5
+                train_keys = [key for key in all_keys if re.match(r'^Ses0[123].*$', key)]
+                val_keys = [key for key in all_keys if re.match(r'^Ses04.*$', key)]
+                test_keys = [key for key in all_keys if re.match(r'^Ses05.*$', key)]
+                speaker_ind = {
+                    'train': train_keys,
+                    'val': val_keys,
+                    'test': test_keys,
+                }
+                return speaker_ind
+            elif split_type == 'no-lexical-repeat':
+                raise NotImplementedError('No lexical repeat not yet implemented')
+            elif split_type == 'speaker-split':
+                speaker_split = {}
+                for session in range(1,6):
+                    for gender in ['M', 'F']:
+                        speaker_regex = rf'^Ses0{session}.*{gender}\d+$'
+                        speaker_split[f'Session0{session}{gender}'] = [key for key in all_keys if re.match(speaker_regex, key)]
+                return speaker_split
+        else:
+            raise ValueError(f'Unknown split type {data_split_type}')

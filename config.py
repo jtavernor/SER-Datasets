@@ -1,3 +1,6 @@
+import os
+import yaml as pyyaml
+
 class Config:
     def __new__(cls):
         if not hasattr(cls, 'instance'):

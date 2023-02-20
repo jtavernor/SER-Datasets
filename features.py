@@ -1,6 +1,6 @@
 ### Set of functions to load various audio/text features
 import librosa
-from .config import Config
+from config import Config
 
 def read_wav(wav_path):
     SR = Config()['SR']

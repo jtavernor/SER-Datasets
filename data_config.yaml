@@ -16,3 +16,4 @@ mfb_settings:
   fmax: None
   clamp_val: 3.0
   clamp_values: True
+iemocap_directory: '/data1/public/data/IEMOCAP_full_release'
