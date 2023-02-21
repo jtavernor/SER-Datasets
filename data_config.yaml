@@ -16,4 +16,7 @@ mfb_settings:
   fmax: None
   clamp_val: 3.0
   clamp_values: True
-iemocap_directory: '/data1/public/data/IEMOCAP_full_release'
+iemocap_directory: '/z/public/data/IEMOCAP_full_release'
+improv_directory: '/z/public/data/MSP_IMPROV'
+podcast_directory: '/z/public/data/MSP_Podcast'
+muse_directory: '/z/public/data/MuSE'

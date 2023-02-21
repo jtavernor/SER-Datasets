@@ -44,6 +44,8 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                     labels[label_id]['val'] = val_lbl
                     # labels[label_id]['dom'] = dom_lbl
                     labels[label_id]['gender'] = re.match(r'.*(?P<gender>[FM])\d+$', label_id).group('gender')
+                    session = re.match(r'^Ses(?P<session>\d\d\).*$').group('session')
+                    labels[label_id]['speaker_id'] = f'{session}{labels[label_id]["gender"]}'
                 elif line.startswith('A-E'):
                     # Attribute perception of other evaluator
                     pass # For now don't use the individual evaluator scores
@@ -80,6 +82,9 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                         print(f'No label found for transcript {utt_id} in file {transcript_file}')
 
         return labels
+
+    def prepare_labels(self):
+        super().prepare_labels(items_to_scale=['act', 'val', 'self-report-act', 'self-report-val'])
 
     def get_wavs(self):
         all_wavs = glob(os.path.join(self.iemocap_directory, '**/sentences/wav/**/*.wav'))

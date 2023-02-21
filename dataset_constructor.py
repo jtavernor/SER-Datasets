@@ -78,7 +78,9 @@ class DatasetConstructor:
     def read_labels(self):
         raise NotImplementedError('Template dataset constructor called. This class should be inherited and have read_labels return a dictionary of loaded labels and a dictionary of label meta information')
 
-    def prepare_labels(self, new_minimum=-1, new_maximum=1, items_to_scale=['act', 'val', 'self-report-val', 'self-report-act']):
+    def prepare_labels(self, new_minimum=-1, new_maximum=1, items_to_scale=None):
+        if items_to_scale is None:
+            raise ValueError('prepare_labels should be overridden and called with items_to_scale set to a list of strings defining which items should be scaled')
         # function min-max scales continuous labels and bins categorical labels
         num_bins = self.config['num_labels']
         for value_type in items_to_scale:
