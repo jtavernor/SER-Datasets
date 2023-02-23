@@ -1,5 +1,5 @@
-from dataset_constructor import DatasetConstructor
-from config import Config
+from .dataset_constructor import DatasetConstructor
+from .config import Config
 from glob import glob
 import os
 import re
@@ -8,7 +8,7 @@ import pickle
 class MuSEDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
         self.muse_directory = Config()['muse_directory']
-        super().__init__(0, filter_fn, dataset_save_location)
+        super().__init__(3, filter_fn, dataset_save_location)
 
 # The forced alignment code isn't actually necessary as IEMOCAP has aligned word timings already 
     def read_labels(self):
@@ -72,6 +72,7 @@ class MuSEDatasetConstructor(DatasetConstructor):
         split = {
             'stressed': [key for key in self.labels if self.labels[key]['type'] == 'S'],
             'non_stressed': [key for key in self.labels if self.labels[key]['type'] == 'NS'],
+            'full': list(self.labels.keys()),
         }
         assert set(self.labels.keys()) == set(split['stressed'] + split['non_stressed'])
         return split

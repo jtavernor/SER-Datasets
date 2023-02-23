@@ -1,5 +1,5 @@
-from dataset_constructor import DatasetConstructor
-from config import Config
+from .dataset_constructor import DatasetConstructor
+from .config import Config
 from glob import glob
 import os
 import re
@@ -8,7 +8,7 @@ import pickle
 class PodcastDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
         self.podcast_directory = Config()['podcast_directory']
-        super().__init__(0, filter_fn, dataset_save_location)
+        super().__init__(2, filter_fn, dataset_save_location)
 
     def read_labels(self):
         self.podcast_data_split = {'train': [], 'val': [], 'test_set_1': [], 'test_set_2': []}

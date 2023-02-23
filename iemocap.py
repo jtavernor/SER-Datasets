@@ -1,5 +1,5 @@
-from dataset_constructor import DatasetConstructor
-from config import Config
+from .dataset_constructor import DatasetConstructor
+from .config import Config
 from glob import glob
 import os
 import re

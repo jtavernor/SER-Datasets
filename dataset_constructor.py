@@ -1,13 +1,15 @@
-from config import Config
-from utils import load_json
-from features import read_wav, get_mfb, get_bert_embedding, get_w2v2
+from .config import Config
+from .utils import load_json
+from .features import read_wav, get_mfb, get_bert_embedding, get_w2v2
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel, Wav2Vec2FeatureExtractor, Wav2Vec2Model
+from sklearn.utils.class_weight import compute_class_weight
 import multiprocessing.dummy as mp_thread
 import numpy as np
 import torch
 import librosa
 import pickle
+import os
 
 # Iterable PyTorch dataset instance
 class DatasetInstance(torch.utils.data.Dataset):
@@ -29,7 +31,7 @@ class DatasetInstance(torch.utils.data.Dataset):
         labels = self.labels[item_key]
 
         # Return a dictionary of all labels for this item + the current dataset id
-        return {**labels, 'dataset_id': self.dataset_id}
+        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_id}
 
     def class_weights(self):
         act_labels = [self.labels[key]['act_bin'] for key in self.labels]
@@ -62,8 +64,9 @@ class DatasetConstructor:
 
         if dataset_save_location is not None:
             # Load dataset if file exists 
-            self.load(dataset_save_location)
-            return
+            if os.path.exists(dataset_save_location):
+                self.load(dataset_save_location)
+                return
 
         assert filter_fn is None or callable(filter_fn), 'If filter_fn is defined it should be a callable function\nreturning True if a key should be kept and False if it should be deleted'
 
@@ -159,7 +162,7 @@ class DatasetConstructor:
                 del self.wav_keys_to_use[key]
             
         # Invalid wav keys (too long or short) can be removed while making audio features
-        num_workers = 8
+        num_workers = 2 # TODO: This value should vary based on the settings -- wav2vec2/bert better with lower number over raw values (more processing = less workers)
         pool = mp_thread.Pool(num_workers)
 
         # Define some values that we want to track about the wav files
