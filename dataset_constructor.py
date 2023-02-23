@@ -2,19 +2,20 @@ from config import Config
 from utils import load_json
 from features import read_wav, get_mfb, get_bert_embedding, get_w2v2
 from tqdm import tqdm
+from transformers import AutoTokenizer, AutoModel, Wav2Vec2FeatureExtractor, Wav2Vec2Model
 import multiprocessing.dummy as mp_thread
 import numpy as np
 import torch
 import librosa
+import pickle
 
 # Iterable PyTorch dataset instance
 class DatasetInstance(torch.utils.data.Dataset):
     def __init__(self, dataset_constructor, keys_to_use):
-        self.dataset_id = parent_dataset.dataset_id
-        self.dataset_ids = {}
+        self.dataset_id = dataset_constructor.dataset_id
         dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
         for dict_name in dicts_to_copy:
-            parent_dict = getattr(parent_dataset, dict_name)
+            parent_dict = getattr(dataset_constructor, dict_name)
             new_dict = {key: parent_dict[key] for key in parent_dict}
             setattr(self, dict_name, new_dict)
 
@@ -26,9 +27,9 @@ class DatasetInstance(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item_key = self.split_keys[idx]
         labels = self.labels[item_key]
-        act_label, act_bin_label, val_label, val_bin_label, transcript_emb, audio_feats = labels['act'], labels['act_bin'], labels['val'], labels['val_bin'], self.transcript_embeddings[item_key], self.features[item_key]
 
-        return audio_feats, transcript_emb, act_label, act_bin_label, val_label, val_bin_label, item_key, self.dataset_ids[item_key]
+        # Return a dictionary of all labels for this item + the current dataset id
+        return {**labels, 'dataset_id': self.dataset_id}
 
     def class_weights(self):
         act_labels = [self.labels[key]['act_bin'] for key in self.labels]
@@ -56,13 +57,15 @@ class DatasetConstructor:
         if self._initialised:
             return
 
+        self.dataset_id = dataset_id
+        self.config = Config()
+
         if dataset_save_location is not None:
             # Load dataset if file exists 
-            pass
+            self.load(dataset_save_location)
+            return
 
         assert filter_fn is None or callable(filter_fn), 'If filter_fn is defined it should be a callable function\nreturning True if a key should be kept and False if it should be deleted'
-
-        self.config = Config()
 
         # self.labels should be of the format {'key': {label: label_value...}}
         self.labels = self.read_labels()
@@ -74,6 +77,23 @@ class DatasetConstructor:
 
         # Features will be added to the labels file
         self.generate_features()
+
+        self._initialised = True
+
+        if dataset_save_location is not None:
+            # Load dataset if file exists 
+            self.save(dataset_save_location)
+
+    def load(self, load_path):
+        with open(load_path, 'rb') as f:
+            loaded_attributes = pickle.load(f)
+            assert self.config == loaded_attributes['config'], 'Saved dataset config does not match config set in data_config.yaml'
+            for key in loaded_attributes:
+                setattr(self, key, loaded_attributes[key])
+
+    def save(self, save_path):
+        with open(save_path, 'wb') as f:
+            pickle.dump(self.__dict__, f)
 
     def read_labels(self):
         raise NotImplementedError('Template dataset constructor called. This class should be inherited and have read_labels return a dictionary of loaded labels and a dictionary of label meta information')
@@ -145,12 +165,30 @@ class DatasetConstructor:
         # Define some values that we want to track about the wav files
         self.wav_rms = {} # Used for SNR
         self.wav_lengths = {}
+        self.removed_wavs = []
 
-        for _ in tqdm(pool.imap_unordered(self.save_speech_features, self.wav_keys_to_use.keys()), total=len(self.wav_keys_to_use.keys()), desc='Saving audio features'):
+        # Create w2v2 and bert models if required by features
+        if self.config['audio_feature_type'] != 'raw' and self.config['audio_feature_type'] != 'mfb' and type(self.config['audio_feature_type']) == str:
+            self.wav2vec2_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(self.config['audio_feature_type'])
+            self.wav2vec2_model = Wav2Vec2Model.from_pretrained(self.config['audio_feature_type'])
+            if torch.cuda.is_available():
+                self.wav2vec2_model = self.wav2vec2_model.to('cuda')
+            self.wav2vec2_model.eval()
+
+        if self.config['text_feature_type'] != 'raw' and type(self.config['text_feature_type']) == str:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config['text_feature_type'])
+            self.bert_model = AutoModel.from_pretrained(self.config['text_feature_type'])
+            if torch.cuda.is_available():
+                self.bert_model = self.bert_model.to('cuda')
+
+        for _ in tqdm(pool.imap_unordered(self.save_speech_features, self.wav_keys_to_use.keys()), total=len(self.wav_keys_to_use.keys()), desc='Saving and extracting speech features'):
             pass
         
         pool.close()
         pool.join()
+        print(f'Removed {len(self.removed_wavs)} wav files for being too short/long')
+        print(f'Wav files were {self.removed_wavs}')
+        del self.removed_wavs
 
     def save_speech_features(self, wav_key):
         # First check if the wav key has a label
@@ -162,6 +200,7 @@ class DatasetConstructor:
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
         if duration < self.config['min_len'] or duration > self.config['max_len']:
+            self.removed_wavs.append(wav_key)
             del self.wav_keys_to_use[wav_key]
             if wav_key in self.labels:
                 del self.labels[wav_key]
@@ -177,7 +216,7 @@ class DatasetConstructor:
         elif self.config['audio_feature_type'] == 'mfb':
             self.labels[wav_key]['audio'] = get_mfb(y, sr)
         elif type(self.config['audio_feature_type']) == str:
-            self.labels[wav_key]['audio'] = get_w2v2(y, sr, w2v2_model=self.config['audio_feature_type'])
+            self.labels[wav_key]['audio'] = get_w2v2(y, sr, w2v2_extractor=self.wav2vec2_feature_extractor, w2v2_model=self.wav2vec2_model)
         else:
             raise IOError(f"Uknown audio feature type {self.config['audio_feature_type']} in data_config.yaml")
 
@@ -193,9 +232,9 @@ class DatasetConstructor:
         if 'transcript' not in self.labels[wav_key]:
             raise NotImplementedError('TODO: Implement ASR')
         if self.config['text_feature_type'] == 'raw':
-            self.labels[wav_key]['text'] = self.labels[wav_key]['transcript']
+            self.labels[wav_key]['transcript'] = self.labels[wav_key]['transcript']
         elif type(self.config['text_feature_type']) == str:
-            self.labels[wav_key]['text'] = get_bert_embedding(self.labels[wav_key]['transcript'], bert_model=self.config['text_feature_type'])
+            self.labels[wav_key]['transcript'] = get_bert_embedding(self.labels[wav_key]['transcript'], bert_tokenizer=self.tokenizer, bert_model=self.bert_model)
         else:
             raise IOError(f"Uknown text feature type {self.config['audio_feature_type']} in data_config.yaml")
 

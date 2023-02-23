@@ -1,5 +1,6 @@
 ### Set of functions to load various audio/text features
 import librosa
+import torch
 from config import Config
 
 def read_wav(wav_path):
@@ -22,8 +23,21 @@ def clamp_mfb(mfb):
     mfb[mfb<-clampVal] = -clampVal
     return mfb
 
-def get_w2v2(y, sr, w2v2_model='facebook/wav2vec2-base'):
-    pass
+def get_w2v2(y, sr, w2v2_extractor, w2v2_model):
+    audio_features = w2v2_extractor(y, sampling_rate=16000, return_tensors='pt')
+    assert len(audio_features) == 1
+    with torch.no_grad():
+        audio_features = w2v2_model(**audio_features)['last_hidden_state']
+        audio_features = torch.mean(audio_features, dim=1)
+        audio_features = audio_features.squeeze(dim=0).numpy()
 
-def get_bert_embedding(transcript, bert_model='google/bert_uncased_L-4_H-512_A-8'):
-    pass
+    return audio_features
+
+def get_bert_embedding(transcript, bert_tokenizer, bert_model, return_cls=True):
+    bert_tokens = bert_tokenizer.encode_plus(transcript, add_special_tokens=True, return_tensors='pt')
+    out = bert_model(**bert_tokens).last_hidden_state
+    if return_cls:
+        return out.squeeze()[0]
+    else:
+        raise NotImplementedError('Padding wont work for non-cls bert this is still todo')
+        return out.squeeze()

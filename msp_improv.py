@@ -39,7 +39,7 @@ class ImprovDatasetConstructor(DatasetConstructor):
 
         # Now load transcripts for each label 
         for key in list(labels.keys()):
-            transcript_file = os.path.join(self.improv_directory, 'MSP-IMPROV_text', f'{key}.txt')
+            transcript_file = os.path.join(self.improv_directory, 'Text', f'{key}.txt')
             if not os.path.exists(transcript_file):
                 print(f'Could not find transcript for {key}. Removing label.')
                 del labels[key]

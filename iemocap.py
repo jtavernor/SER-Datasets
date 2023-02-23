@@ -44,7 +44,7 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                     labels[label_id]['val'] = val_lbl
                     # labels[label_id]['dom'] = dom_lbl
                     labels[label_id]['gender'] = re.match(r'.*(?P<gender>[FM])\d+$', label_id).group('gender')
-                    session = re.match(r'^Ses(?P<session>\d\d\).*$').group('session')
+                    session = re.match(r'^Ses(?P<session>\d\d).*$', label_id).group('session')
                     labels[label_id]['speaker_id'] = f'{session}{labels[label_id]["gender"]}'
                 elif line.startswith('A-E'):
                     # Attribute perception of other evaluator
