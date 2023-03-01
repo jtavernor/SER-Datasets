@@ -15,12 +15,15 @@ import os
 class DatasetInstance(torch.utils.data.Dataset):
     def __init__(self, dataset_constructor, keys_to_use):
         self.dataset_id = dataset_constructor.dataset_id
+        self.dataset_ids = {key: self.dataset_id for key in keys_to_use}
         dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
         for dict_name in dicts_to_copy:
             parent_dict = getattr(dataset_constructor, dict_name)
-            new_dict = {key: parent_dict[key] for key in parent_dict}
+            new_dict = {}
+            for key in keys_to_use:
+                new_dict[key] = parent_dict[key]
             setattr(self, dict_name, new_dict)
-
+            
         self.split_keys = keys_to_use.copy()
 
     def __len__(self):
@@ -31,7 +34,7 @@ class DatasetInstance(torch.utils.data.Dataset):
         labels = self.labels[item_key]
 
         # Return a dictionary of all labels for this item + the current dataset id
-        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_id}
+        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key]}
 
     def class_weights(self):
         act_labels = [self.labels[key]['act_bin'] for key in self.labels]
@@ -40,6 +43,38 @@ class DatasetInstance(torch.utils.data.Dataset):
             'act': compute_class_weight(class_weight='balanced', classes=np.unique(act_labels), y=np.array(act_labels)),
             'val': compute_class_weight(class_weight='balanced', classes=np.unique(val_labels), y=np.array(val_labels))
         }
+
+# We just need a new init function for the multi domain dataset as it just combines other datasets into this 
+class MultiDomainDataset(DatasetInstance):
+    def __init__(self, dataset_instances, dataset_strs):
+        assert all([type(dataset) == DatasetInstance for dataset in dataset_instances]), 'MultiDomainMMFusionDataset constructor expects all provided datasets to be of type MMFusionDataset'
+        assert len(dataset_instances) == len(dataset_strs), f'Expected to get same number of datasets ({len(dataset_instances)}) as dataset_strs/dataset string names ({len(dataset_strs)})'
+        print('Merging datasets with id', [ds.dataset_id for ds in dataset_instances])
+        print('dataset sizes:', [len(ds.split_keys) for ds in dataset_instances])
+        self.dataset_ids = {}
+        self.split_keys = []
+        dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
+        for dict_name in dicts_to_copy:
+            new_dict = {}
+            for i, dataset in enumerate(dataset_instances):
+                dataset_str = dataset_strs[i]
+                parent_dict = getattr(dataset, dict_name)
+                for key in parent_dict:
+                    new_key = f'{dataset_str}_{key}'
+                    new_dict[new_key] = parent_dict[key]
+                    self.dataset_ids[new_key] = dataset.dataset_id
+                    self.split_keys.append(new_key)
+            setattr(self, dict_name, new_dict)
+
+        self.split_keys = list(set(self.split_keys))
+    
+    # Essentially the same as the base class, but instead of returning self.dataset_id return the stored sample id 
+    def __getitem__(self, idx):
+        item_key = self.split_keys[idx]
+        labels = self.labels[item_key]
+
+        # Return a dictionary of all labels for this item + the current dataset id
+        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key]}
 
 # This class loads all the relevant data and then returns iterable datasets for each 
 # data split
@@ -122,7 +157,7 @@ class DatasetConstructor:
             return load_json(data_split_type)
         return data_split_type # Whatever inherits this template should override this method and handle the string
 
-    def build(self, data_split_type):
+    def build(self, data_split_type=None):
         split_dict = self.get_dataset_splits(data_split_type)
         if split_dict == 'all': # If using all keys just return the one dataset 
             return DatasetInstance(self, list(self.labels.keys()))

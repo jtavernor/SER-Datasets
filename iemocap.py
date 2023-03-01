@@ -107,10 +107,14 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                 train_keys = [key for key in all_keys if re.match(r'^Ses0[123].*$', key)]
                 val_keys = [key for key in all_keys if re.match(r'^Ses04.*$', key)]
                 test_keys = [key for key in all_keys if re.match(r'^Ses05.*$', key)]
+                test05m_keys = [key for key in all_keys if re.match(r'^Ses05.*M\d+$', key)]
+                test05f_keys = [key for key in all_keys if re.match(r'^Ses05.*F\d+$', key)]
                 speaker_ind = {
                     'train': train_keys,
                     'val': val_keys,
-                    'test': test_keys,
+                    'test_05m': test05m_keys,
+                    'test_05f': test05f_keys,
+                    'test_05_full': test_keys,
                 }
                 return speaker_ind
             elif split_type == 'no-lexical-repeat':

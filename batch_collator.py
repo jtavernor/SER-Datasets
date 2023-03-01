@@ -15,7 +15,23 @@ class BatchCollator:
         sample_types = {}
         for key in sample_keys:
             types = [type(sample[key]) if key in sample else None for sample in samples]
-            data_type = types[0] if len(set(types)) == 1 else 'unknown' # In the event of unknown the collator will just return a list of the values
+            set_of_types = set(types)
+            if len(set_of_types) > 1:
+                # Some samples may be types that are mostly shared and should be combined
+                int_types = [torch.long, int, numpy.int64]
+                float_types = [torch.float32, float, numpy.float32]
+                all_float = True
+                all_int = True
+                for type_var in set_of_types:
+                    all_int &= type_var in int_types
+                    all_float &= type_var in float_types
+                assert not all_int or not all_float
+                if all_int:
+                    set_of_types = set([int])
+                if all_float:
+                    set_of_types = set([float])
+
+            data_type = types[0] if len(set_of_types) == 1 else 'unknown' # In the event of unknown the collator will just return a list of the values
             sample_types[key] = data_type
 
         return sample_types
@@ -23,6 +39,12 @@ class BatchCollator:
     def __call__(self, samples):
         # Still want to return a dictionary indicating each value from the dataset
         batched_samples = {}
+
+        # All the numpy.ndarrays need to be treated as torch arrays
+        for i, sample in enumerate(samples):
+            for key in sample:
+                if type(sample[key]) == numpy.ndarray:
+                    samples[i][key] = torch.from_numpy(sample[key])
 
         # The collator needs to calculate how to treat each value given the first time it is called 
         # this is so that the data collator can handle different data input types

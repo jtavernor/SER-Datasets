@@ -67,7 +67,7 @@ class MuSEDatasetConstructor(DatasetConstructor):
 
         return label_id_to_wav
 
-    def get_dataset_splits(self):
+    def get_dataset_splits(self, _=None):
         # MuSE only supports a stressed/non-stressed split
         split = {
             'stressed': [key for key in self.labels if self.labels[key]['type'] == 'S'],
