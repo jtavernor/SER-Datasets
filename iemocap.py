@@ -3,6 +3,7 @@ from .config import Config
 from glob import glob
 import os
 import re
+import numpy as np
 
 class IEMOCAPDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
@@ -93,9 +94,20 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
         }
         return label_id_to_wav
 
-    def get_dataset_splits(self, data_split_type):
+    def get_dataset_splits(self, data_split_type, perception_of_self_only=False):
+        if perception_of_self_only:
+            self.dataset_id = -1
+        else:
+            self.dataset_id = 0
         split_type = super().get_dataset_splits(data_split_type)
         all_keys = list(self.labels.keys())
+        if perception_of_self_only:
+            percep_self_keys = []
+            for key in all_keys:
+                if 'self-report-act' in self.labels[key]:
+                    assert 'self-report-val' in self.labels[key]
+                    percep_self_keys.append(key)
+            all_keys = percep_self_keys
         if type(split_type) == dict:
             return split_type
         elif type(split_type) == str:
@@ -115,6 +127,32 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                     'test_05m': test05m_keys,
                     'test_05f': test05f_keys,
                     'test_05_full': test_keys,
+                }
+                # For self-report some of these may be empty so remove in that case 
+                for key in list(speaker_ind.keys()):
+                    if len(speaker_ind[key]) == 0:
+                        del speaker_ind[key]
+                return speaker_ind
+            elif split_type == 'speaker-independent-2':
+                # for perception of self there are a lot less keys 
+                # 598 for session 1
+                # 305 for session 2 (only F speech)
+                # 900 for session 3
+                # 0 for session 4
+                # 182 for session 5 (only M speech) 
+                # So, to keep it as close as possible to the original we will have non-speaker independent validation, and use only 05m for testing
+                train_keys = [key for key in all_keys if re.match(r'^Ses0[12].*$', key)]
+                ses03f_keys = [key for key in all_keys if re.match(r'^Ses03.*F\d+$', key)]
+                ses03m_keys = [key for key in all_keys if re.match(r'^Ses03.*M\d+$', key)]
+                test05m_keys = [key for key in all_keys if re.match(r'^Ses05.*M\d+$', key)]
+                np.random.shuffle(ses03f_keys)
+                np.random.shuffle(ses03m_keys)
+                val_keys = ses03f_keys[:len(ses03f_keys)//2] + ses03m_keys[:len(ses03m_keys)//2]
+                train_keys = train_keys + ses03f_keys[len(ses03f_keys)//2:] + ses03m_keys[len(ses03m_keys)//2:]
+                speaker_ind = {
+                    'train': train_keys,
+                    'val': val_keys,
+                    'test_05m': test05m_keys
                 }
                 return speaker_ind
             elif split_type == 'no-lexical-repeat':

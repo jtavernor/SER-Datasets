@@ -10,6 +10,7 @@ import torch
 import librosa
 import pickle
 import os
+import copy
 
 # Iterable PyTorch dataset instance
 class DatasetInstance(torch.utils.data.Dataset):
@@ -21,7 +22,7 @@ class DatasetInstance(torch.utils.data.Dataset):
             parent_dict = getattr(dataset_constructor, dict_name)
             new_dict = {}
             for key in keys_to_use:
-                new_dict[key] = parent_dict[key]
+                new_dict[key] = copy.deepcopy(parent_dict[key])
             setattr(self, dict_name, new_dict)
             
         self.split_keys = keys_to_use.copy()
@@ -37,8 +38,8 @@ class DatasetInstance(torch.utils.data.Dataset):
         return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key]}
 
     def class_weights(self):
-        act_labels = [self.labels[key]['act_bin'] for key in self.labels]
-        val_labels = [self.labels[key]['val_bin'] for key in self.labels]
+        act_labels = [self.labels[key]['act_bin'] if 'act_bin' in self.labels[key] else self.labels[key]['self-report-act_bin'] for key in self.labels]
+        val_labels = [self.labels[key]['val_bin'] if 'val_bin' in self.labels[key] else self.labels[key]['self-report-val_bin'] for key in self.labels]
         return {
             'act': compute_class_weight(class_weight='balanced', classes=np.unique(act_labels), y=np.array(act_labels)),
             'val': compute_class_weight(class_weight='balanced', classes=np.unique(val_labels), y=np.array(val_labels))
@@ -157,8 +158,8 @@ class DatasetConstructor:
             return load_json(data_split_type)
         return data_split_type # Whatever inherits this template should override this method and handle the string
 
-    def build(self, data_split_type=None):
-        split_dict = self.get_dataset_splits(data_split_type)
+    def build(self, data_split_type=None, **kwargs):
+        split_dict = self.get_dataset_splits(data_split_type, **kwargs)
         if split_dict == 'all': # If using all keys just return the one dataset 
             return DatasetInstance(self, list(self.labels.keys()))
 
