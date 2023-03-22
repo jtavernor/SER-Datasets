@@ -1,4 +1,4 @@
-from .batch_collator import BatchCollator
+from .batch_collator import BatchCollator, SelfReportBatchCollator
 from .config import Config as DataConfig
 from .iemocap import IEMOCAPDatasetConstructor
 from .msp_improv import ImprovDatasetConstructor
