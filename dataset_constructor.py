@@ -24,7 +24,7 @@ class DatasetInstance(torch.utils.data.Dataset):
             for key in keys_to_use:
                 new_dict[key] = copy.deepcopy(parent_dict[key])
             setattr(self, dict_name, new_dict)
-            
+
         self.split_keys = keys_to_use.copy()
 
     def __len__(self):

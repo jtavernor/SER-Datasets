@@ -30,7 +30,9 @@ class MuSEDatasetConstructor(DatasetConstructor):
                 else:
                     raise IOError(f'Encountered duplicate label {utt_id}')
                 labels[utt_id]['act'] = float(Activation_Mean)
+                labels[utt_id]['self-report-act'] = float(S_Activation)
                 labels[utt_id]['val'] = float(Valence_Mean)
+                labels[utt_id]['self-report-val'] = float(S_Valence)
                 labels[utt_id]['transcript'] = transcript
                 labels[utt_id]['gender'] = Gender
                 labels[utt_id]['type'] = Type # S == stressed, NS == non_stressed
@@ -49,7 +51,7 @@ class MuSEDatasetConstructor(DatasetConstructor):
         return transcript
 
     def prepare_labels(self):
-        super().prepare_labels(items_to_scale=['act', 'val'])
+        super().prepare_labels(items_to_scale=['act', 'val', 'self-report-act', 'self-report-val'])
 
     def get_wavs(self):
         non_stressed_wavs = glob(os.path.join(self.muse_directory, 'Non Stressed', 'Audio', 'Non Stressed Question Monologue Audio*', '*.wav'))
@@ -67,12 +69,19 @@ class MuSEDatasetConstructor(DatasetConstructor):
 
         return label_id_to_wav
 
-    def get_dataset_splits(self, _=None):
+    def get_dataset_splits(self, _=None, perception_of_self_only=False):
         # MuSE only supports a stressed/non-stressed split
+        labels_to_use = self.labels.keys()
+        if perception_of_self_only:
+            labels_to_use = []
+            for label in self.labels.keys():
+                if 'self-report-act' in self.labels[label]:
+                    assert 'self-report-val' in self.labels[label]
+                    labels_to_use.append(label)
         split = {
-            'stressed': [key for key in self.labels if self.labels[key]['type'] == 'S'],
-            'non_stressed': [key for key in self.labels if self.labels[key]['type'] == 'NS'],
-            'full': list(self.labels.keys()),
+            'stressed': [key for key in labels_to_use if self.labels[key]['type'] == 'S'],
+            'non_stressed': [key for key in labels_to_use if self.labels[key]['type'] == 'NS'],
+            'full': list(labels_to_use),
         }
-        assert set(self.labels.keys()) == set(split['stressed'] + split['non_stressed'])
+        assert set(labels_to_use) == set(split['stressed'] + split['non_stressed'])
         return split
