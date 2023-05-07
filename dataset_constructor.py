@@ -185,8 +185,6 @@ class DatasetConstructor:
         if self.labels is not None:
             label_keys = set(self.labels.keys())
             wav_keys = set(self.wav_keys_to_use.keys())
-            print(label_keys)
-            print(wav_keys)
             invalid_label_keys = label_keys - wav_keys
             print(f'Removing {len(invalid_label_keys)} labels where no corresponding wav file was found.')
             print(f'labels were: {invalid_label_keys}')
