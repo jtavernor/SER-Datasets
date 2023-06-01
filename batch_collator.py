@@ -14,8 +14,34 @@ class BatchCollator:
 
         sample_types = {}
         for key in sample_keys:
-            types = [type(sample[key]) if key in sample else None for sample in samples]
-            data_type = types[0] if len(set(types)) == 1 else 'unknown' # In the event of unknown the collator will just return a list of the values
+            def get_type(sample):
+                if key not in sample:
+                    return None
+                if type(sample[key]) == torch.Tensor:
+                    return sample[key].dtype
+                return type(sample[key])
+            types = [get_type(sample) for sample in samples]
+            set_of_types = set(types)
+            if len(set_of_types) > 1:
+                # Some samples may be types that are mostly shared and should be combined
+                int_types = [torch.long, torch.int64, int, numpy.int64]
+                float_types = [torch.float32, float, numpy.float32]
+                all_float = True
+                all_int = True
+                for type_var in set_of_types:
+                    all_int &= type_var in int_types
+                    all_float &= type_var in float_types
+                assert not all_int or not all_float
+                if all_int:
+                    types = [int]
+                if all_float:
+                    types = [float]
+            set_of_types = set(types)
+            data_type = types[0] if len(set_of_types) == 1 else 'unknown' # In the event of unknown the collator will just return a list of the values
+            if data_type == torch.float32: # If all values have these types then this is already a tensor and needs to be treated specially
+                data_type = torch.Tensor
+            if data_type == torch.long:
+                data_type = torch.Tensor
             sample_types[key] = data_type
 
         return sample_types
@@ -23,6 +49,12 @@ class BatchCollator:
     def __call__(self, samples):
         # Still want to return a dictionary indicating each value from the dataset
         batched_samples = {}
+
+        # All the numpy.ndarrays need to be treated as torch arrays
+        for i, sample in enumerate(samples):
+            for key in sample:
+                if type(sample[key]) == numpy.ndarray:
+                    samples[i][key] = torch.from_numpy(sample[key])
 
         # The collator needs to calculate how to treat each value given the first time it is called 
         # this is so that the data collator can handle different data input types
@@ -80,3 +112,23 @@ class BatchCollator:
             for i, value in enumerate(value_list):
                 value_tensor[i] = value
             return value_tensor
+
+# A collator that merges self-report-X and X data with a mask where the mask is true for values that are from self-report and false for values from perception of other
+# useful for things like ExpeR where both types are merged and values may be missing in each preventing the default collator from creating torch tensors correctly
+class SelfReportBatchCollator(BatchCollator):
+    def __call__(self, samples):
+        batched_samples = super().__call__(samples)
+        # Merge 'X' and 'self-report-X', for act, act_bin, val, and val_bin
+        # first find the mask 
+        self_report_mask = batched_samples['dataset_id'] == -1
+        batched_samples['self_report_mask'] = self_report_mask
+
+        # Now create merged tensors 
+        for value in ['act', 'act_bin', 'val', 'val_bin']:
+            dtype = torch.long if '_bin' in value else torch.float32
+            merge_tensor = torch.zeros(len(self_report_mask), dtype=dtype, device=self.device)
+            for i in range(len(self_report_mask)):
+                merge_tensor[i] = batched_samples[f'self-report-{value}'][i] if self_report_mask[i] else batched_samples[value][i]
+            batched_samples[f'merged_{value}'] = merge_tensor
+
+        return batched_samples

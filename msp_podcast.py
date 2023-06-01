@@ -58,7 +58,7 @@ class PodcastDatasetConstructor(DatasetConstructor):
         
         for key in list(labels.keys()):
             if key in transcripts:
-                labels[key]['transcript'] = transcripts[key]
+                labels[key]['transcript'] = ' '.join([word[0] for word in transcripts[key]['features']])
             else:
                 print('No transcript found for', key)
 
@@ -74,6 +74,12 @@ class PodcastDatasetConstructor(DatasetConstructor):
         }
         return label_id_to_wav
 
-    def get_dataset_splits(self):
-        # MSP-Podcast only supports the default split 
-        return self.podcast_data_split
+    def get_dataset_splits(self, _=None):
+        # MSP-Podcast only supports the default split
+        # ensure no labels are contained in the data split that were later removed for length 
+        return {
+            'train': [key for key in self.podcast_data_split['train'] if key in self.labels],
+            'val': [key for key in self.podcast_data_split['val'] if key in self.labels],
+            'test_set_1': [key for key in self.podcast_data_split['test_set_1'] if key in self.labels],
+            'test_set_2': [key for key in self.podcast_data_split['test_set_2'] if key in self.labels],
+        }
