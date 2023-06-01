@@ -158,14 +158,9 @@ class DatasetConstructor:
             return load_json(data_split_type)
         return data_split_type # Whatever inherits this template should override this method and handle the string
 
-<<<<<<< HEAD
-    def build(self, data_split_type):
-        keys_to_scale = self.prepare_labels()
-        split_dict = self.get_dataset_splits(data_split_type)
-=======
     def build(self, data_split_type=None, **kwargs):
+        keys_to_scale = self.prepare_labels()
         split_dict = self.get_dataset_splits(data_split_type, **kwargs)
->>>>>>> 112e9892b2abfb9862793b0875cdbf8a077537d5
         if split_dict == 'all': # If using all keys just return the one dataset 
             return DatasetInstance(self, list(self.labels.keys()), keys_to_scale)
 
