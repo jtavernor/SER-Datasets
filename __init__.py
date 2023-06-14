@@ -4,5 +4,6 @@ from .iemocap import IEMOCAPDatasetConstructor
 from .msp_improv import ImprovDatasetConstructor
 from .msp_podcast import PodcastDatasetConstructor
 from .muse import MuSEDatasetConstructor
+from .priori_emotion import PrioriEmotionConstructor
 from .dataset_constructor import MultiDomainDataset
 from .segmented_iemocap import SegmentedIEMOCAPDatasetConstructor, SegmentedNoisyIEMOCAPDatasetConstructor

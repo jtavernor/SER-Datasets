@@ -50,7 +50,7 @@ class ImprovDatasetConstructor(DatasetConstructor):
         return labels
 
     def prepare_labels(self):
-        super().prepare_labels(items_to_scale=['act', 'val'])
+        return ['act', 'val']
 
     def get_wavs(self):
         all_wavs = glob(os.path.join(self.improv_directory, 'Audio/**/**/**/*.wav'))

@@ -51,7 +51,7 @@ class MuSEDatasetConstructor(DatasetConstructor):
         return transcript
 
     def prepare_labels(self):
-        super().prepare_labels(items_to_scale=['act', 'val', 'self-report-act', 'self-report-val'])
+        return ['act', 'val']
 
     def get_wavs(self):
         non_stressed_wavs = glob(os.path.join(self.muse_directory, 'Non Stressed', 'Audio', 'Non Stressed Question Monologue Audio*', '*.wav'))

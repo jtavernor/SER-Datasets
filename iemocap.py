@@ -85,7 +85,7 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
         return labels
 
     def prepare_labels(self):
-        super().prepare_labels(items_to_scale=['act', 'val', 'self-report-act', 'self-report-val'])
+        return ['act', 'val', 'self-report-act', 'self-report-val']
 
     def get_wavs(self):
         all_wavs = glob(os.path.join(self.iemocap_directory, '**/sentences/wav/**/*.wav'))

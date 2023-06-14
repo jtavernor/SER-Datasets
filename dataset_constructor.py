@@ -14,7 +14,8 @@ import copy
 
 # Iterable PyTorch dataset instance
 class DatasetInstance(torch.utils.data.Dataset):
-    def __init__(self, dataset_constructor, keys_to_use):
+    def __init__(self, dataset_constructor, keys_to_use, keys_to_scale):
+        self.config = dataset_constructor.config
         self.dataset_id = dataset_constructor.dataset_id
         self.dataset_ids = {key: self.dataset_id for key in keys_to_use}
         dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
@@ -26,6 +27,22 @@ class DatasetInstance(torch.utils.data.Dataset):
             setattr(self, dict_name, new_dict)
 
         self.split_keys = keys_to_use.copy()
+        self.prepare_labels(items_to_scale=keys_to_scale)
+
+    def prepare_labels(self, new_minimum=-1, new_maximum=1, items_to_scale=None):
+        if items_to_scale is None:
+            raise ValueError('prepare_labels requires items_to_scale to be passed from parent constructor. Define prepare_labels function in constructor and return a list of string of label names that require scaling.')
+        # function min-max scales continuous labels and bins categorical labels
+        num_bins = self.config['num_labels']
+        for value_type in items_to_scale:
+            all_values = [value[value_type] for value in self.labels.values() if value_type in value]
+            min_val = min(all_values)
+            max_val = max(all_values)
+            buckets = np.linspace(new_minimum, new_maximum, num=num_bins+1)
+            for key in self.labels:
+                if value_type in self.labels[key]:
+                    self.labels[key][value_type] = (new_maximum-new_minimum) * (self.labels[key][value_type] - min_val)/(max_val - min_val) + new_minimum
+                    self.labels[key][f'{value_type}_bin'] = min(np.searchsorted(buckets, self.labels[key][value_type], side='right')-1, num_bins-1)
 
     def __len__(self):
         return len(self.split_keys)
@@ -109,8 +126,6 @@ class DatasetConstructor:
         # self.labels should be of the format {'key': {label: label_value...}}
         self.labels = self.read_labels()
 
-        self.prepare_labels()
-
         if filter_fn is not None:
             self.labels = {key: self.labels[key] for key in list(self.labels.keys()) if filter_fn(key)} # Filter the labels based on the filter_fn
 
@@ -137,21 +152,6 @@ class DatasetConstructor:
     def read_labels(self):
         raise NotImplementedError('Template dataset constructor called. This class should be inherited and have read_labels return a dictionary of loaded labels and a dictionary of label meta information')
 
-    def prepare_labels(self, new_minimum=-1, new_maximum=1, items_to_scale=None):
-        if items_to_scale is None:
-            raise ValueError('prepare_labels should be overridden and called with items_to_scale set to a list of strings defining which items should be scaled')
-        # function min-max scales continuous labels and bins categorical labels
-        num_bins = self.config['num_labels']
-        for value_type in items_to_scale:
-            all_values = [value[value_type] for value in self.labels.values() if value_type in value]
-            min_val = min(all_values)
-            max_val = max(all_values)
-            buckets = np.linspace(new_minimum, new_maximum, num=num_bins+1)
-            for key in self.labels:
-                if value_type in self.labels[key]:
-                    self.labels[key][value_type] = (new_maximum-new_minimum) * (self.labels[key][value_type] - min_val)/(max_val - min_val) + new_minimum
-                    self.labels[key][f'{value_type}_bin'] = min(np.searchsorted(buckets, self.labels[key][value_type], side='right')-1, num_bins-1)
-
     def get_dataset_splits(self, data_split_type):
         assert type(data_split_type) == str, 'data_split_type should be a string\neither describing the type of split that should be used\nor a filepath to a json file defining splits'
         if data_split_type[-5:].lower() == '.json' and os.path.exists(data_split_type):
@@ -159,9 +159,10 @@ class DatasetConstructor:
         return data_split_type # Whatever inherits this template should override this method and handle the string
 
     def build(self, data_split_type=None, **kwargs):
+        keys_to_scale = self.prepare_labels()
         split_dict = self.get_dataset_splits(data_split_type, **kwargs)
         if split_dict == 'all': # If using all keys just return the one dataset 
-            return DatasetInstance(self, list(self.labels.keys()))
+            return DatasetInstance(self, list(self.labels.keys()), keys_to_scale)
 
         dataset_split_dict = {}
         for split in split_dict:
@@ -170,7 +171,7 @@ class DatasetConstructor:
                 split = 'train'
             if split == 'val_key':
                 split = 'val'
-            dataset_split_dict[split] = DatasetInstance(self, keys)
+            dataset_split_dict[split] = DatasetInstance(self, keys, keys_to_scale)
 
         return dataset_split_dict
 
