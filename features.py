@@ -19,12 +19,16 @@ def get_mfb(y, sr):
     return mfb
 
 def clamp_mfb(mfb):
+    clampVal = Config()['mfb_settings']['clamp_val']
     mfb[mfb>clampVal] = clampVal
     mfb[mfb<-clampVal] = -clampVal
     return mfb
 
-def get_w2v2(y, sr, w2v2_extractor, w2v2_model):
+def get_w2v2(y, sr, w2v2_extractor, w2v2_model, upsample=False):
     with torch.no_grad():
+        if sr != 16000 and upsample:
+            # print(f'Resampling audio from {sr} to 16000')
+            y = librosa.resample(y, orig_sr=sr, target_sr=16000)
         audio_features = w2v2_extractor(y, sampling_rate=16000, return_tensors='pt')
         if torch.cuda.is_available():
             audio_features = audio_features.to('cuda')
