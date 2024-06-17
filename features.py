@@ -34,19 +34,23 @@ def get_w2v2(y, sr, w2v2_extractor, w2v2_model, upsample=False):
             audio_features = audio_features.to('cuda')
         assert len(audio_features) == 1
         audio_features = w2v2_model(**audio_features)['last_hidden_state']
-        audio_features = torch.mean(audio_features, dim=1)
-        audio_features = audio_features.squeeze(dim=0).cpu().numpy()
 
-        return audio_features
+        return audio_features.cpu().numpy()
+
+def pool_w2v2(unpooled_audio_features):
+    with torch.no_grad():
+        audio_features_pooled = torch.mean(torch.as_tensor(unpooled_audio_features), dim=1)
+        audio_features_pooled = audio_features_pooled.squeeze(dim=0).cpu().numpy()
+    return audio_features_pooled
 
 def get_bert_embedding(transcript, bert_tokenizer, bert_model, return_cls=True):
     with torch.no_grad():
         bert_tokens = bert_tokenizer.encode_plus(transcript, add_special_tokens=True, return_tensors='pt')
-        if torch.cuda.is_available():
-            bert_tokens = bert_tokens.to('cuda')
+        # if torch.cuda.is_available():
+            # bert_tokens = bert_tokens.to('cuda')
+        bert_tokens = bert_tokens.to(bert_model.device)
         out = bert_model(**bert_tokens).last_hidden_state
         if return_cls:
             return out.squeeze()[0].cpu()
         else:
-            raise NotImplementedError('Padding wont work for non-cls bert this is still todo')
-            return out.squeeze().cpu()
+            raise NotImplementedError('todo')

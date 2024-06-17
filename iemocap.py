@@ -8,7 +8,7 @@ import numpy as np
 class IEMOCAPDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
         self.iemocap_directory = Config()['iemocap_directory']
-        super().__init__(0, filter_fn, dataset_save_location)
+        super().__init__(2, filter_fn, dataset_save_location)
 
     def read_labels(self):
         label_file = os.path.join(self.iemocap_directory, 'IEMOCAP_EmoEvaluation.txt')
@@ -33,7 +33,7 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
         for label_id in label_info:
             if label_id in labels:
                 raise IOError(f'Multiple labels for the same speech {label_id}')
-            labels[label_id] = {}
+            labels[label_id] = {'soft_act_labels': [], 'soft_val_labels': []}
             for line in label_info[label_id]:
                 # First line contains averaged labels
                 if line.startswith('[') and line.endswith(']'):
@@ -49,7 +49,15 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                     labels[label_id]['speaker_id'] = f'{session}{labels[label_id]["gender"]}'
                 elif line.startswith('A-E'):
                     # Attribute perception of other evaluator
-                    pass # For now don't use the individual evaluator scores
+                    regex_match = get_evaluator_scores.match(line)
+                    if regex_match:
+                        labels[label_id]['soft_val_labels'].append(int(regex_match.group(1)))
+                        labels[label_id]['soft_act_labels'].append(int(regex_match.group(2)))
+                    else:
+                        # Bad label that is not in the range 1-5 or is just blank 
+                        print(f'Bad label {label_id}: {line}')
+                        del labels[label_id]
+                        break
                 elif line.startswith('A-F') or line.startswith('A-M'):
                     # Attribute perception of self evaluator
                     if 'self-report' in labels[label_id]:
@@ -78,14 +86,14 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                     split_line = line.split()
                     utt_id, transcript = split_line[0], ' '.join(split_line[2:])
                     if utt_id in labels:
-                        labels[utt_id]['transcript'] = transcript
+                        labels[utt_id]['transcript_text'] = transcript
                     else:
                         print(f'No label found for transcript {utt_id} in file {transcript_file}')
 
         return labels
 
     def prepare_labels(self):
-        return ['act', 'val', 'self-report-act', 'self-report-val']
+        return ['act', 'val']
 
     def get_wavs(self):
         all_wavs = glob(os.path.join(self.iemocap_directory, '**/sentences/wav/**/*.wav'))
@@ -96,9 +104,9 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
 
     def get_dataset_splits(self, data_split_type, perception_of_self_only=False):
         if perception_of_self_only:
-            self.dataset_id = -1
+            self.dataset_id = -self.dataset_id * 1000 # 1000 multiplication to remove any chance of overlap with other dataset ids
         else:
-            self.dataset_id = 0
+            self.dataset_id = self.dataset_id
         split_type = super().get_dataset_splits(data_split_type)
         all_keys = list(self.labels.keys())
         if perception_of_self_only:
@@ -164,5 +172,9 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                         speaker_regex = rf'^Ses0{session}.*{gender}\d+$'
                         speaker_split[f'Session0{session}{gender}'] = [key for key in all_keys if re.match(speaker_regex, key)]
                 return speaker_split
+            elif split_type == 'sessions':
+                return {f'Session0{session}': [key for key in all_keys if re.match(f'^Ses0{session}.*$', key)] for session in range(1,6)}
+            elif split_type == 'all':
+                return 'all'
         else:
             raise ValueError(f'Unknown split type {data_split_type}')
