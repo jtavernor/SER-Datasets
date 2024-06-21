@@ -469,6 +469,7 @@ class DatasetConstructor:
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
         too_short = self.config['min_len'] != -1 and duration < self.config['min_len']
+        too_short = too_short or duration <= 0.0 # 0 length audio should be skipped
         too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
         if too_short or too_long:
             self.removed_wavs.append(wav_key)
