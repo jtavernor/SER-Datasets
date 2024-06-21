@@ -8,11 +8,17 @@ import pickle
 class MuSEDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
         self.muse_directory = Config()['muse_directory']
+        self.use_whisper = Config()['use_whisper_for_muse']
         super().__init__(3, filter_fn, dataset_save_location)
 
     def read_labels(self):
         labels = {}
-        lab_file = os.path.join(self.muse_directory, "Survey Information (Questions, Data etc)", "Emotion data from crowdsourcing (C is when annotators had access to all previous sentences).csv")
+        # Versions of MuSE on different machines have different names 
+        if os.path.exists(os.path.join(self.muse_directory, "Survey Information (Questions, Data etc)")):
+            survey_folder_name = "Survey Information (Questions, Data etc)"
+        else:
+            survey_folder_name = "SurveyInformation"
+        lab_file = os.path.join(self.muse_directory, survey_folder_name, "Emotion data from crowdsourcing (C is when annotators had access to all previous sentences).csv")
         get_utt_id = re.compile(r'(?P<utt_id>.*).wav')
         with open(lab_file, 'r') as r:
             for i, line in enumerate(r.readlines()):
@@ -21,7 +27,7 @@ class MuSEDatasetConstructor(DatasetConstructor):
                 line=line.rstrip()
                 Sentence_name,Duration,Gender,Type,Ques_Type,Activation_Mean,Activation_SD,Valence_Mean,Valence_SD,Activation_Annotation,Valence_Annotation,C_Activation_Mean,C_Activation_SD,C_Valence_Mean,C_Valence_SD,C_Activation_Annotation,C_Valence_Annotation,S_Activation,S_Valence = line.split(',')
                 utt_id = get_utt_id.match(Sentence_name).group('utt_id')
-                transcript = self.read_transcript(utt_id)
+                transcript = self.read_transcript(utt_id, Type)
                 if transcript is None:
                     continue
                 if utt_id not in labels:
@@ -41,8 +47,17 @@ class MuSEDatasetConstructor(DatasetConstructor):
 
         return labels
 
-    def read_transcript(self, utt_id):
-        transcript_file = os.path.join(self.muse_directory, 'Combined', 'Utterance Transcripts', f'{utt_id}.txt')
+    def read_transcript(self, utt_id, stress_type):
+        if self.use_whisper:
+            if stress_type == 'NS':
+                directory = 'Nonstressed_Segments'
+            elif stress_type == 'S':
+                directory = 'Stressed_Segments'
+            else:
+                raise ValueError(f'Unknown stress type: {stress_type}')
+            transcript_file = os.path.join(self.muse_directory, 'Whisper-Transcriptions', directory, f'{utt_id}.txt')
+        else:
+            transcript_file = os.path.join(self.muse_directory, 'Combined', 'Utterance Transcripts', f'{utt_id}.txt')
         transcript = None
         if not os.path.isfile(transcript_file):
             print(f'Warning - no transcript found for {utt_id}, skipping.')

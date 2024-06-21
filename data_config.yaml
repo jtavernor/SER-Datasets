@@ -22,3 +22,4 @@ podcast_directory: '/z/public/data/MSP_Podcast'
 muse_directory: '/z/public/data/MuSE'
 segmented_iemocap_directory: '/z/tavernor/mmfusion_storage/segmented_wavs'
 segmented_noisy_iemocap_directory: '/z/tavernor/mmfusion_storage/iemocap_noisy_test/wavfile_test_dataset_ALL_segmented'
+use_whisper_for_muse: True # MuSE has bad transcripts for the segmented wavs, instead use whisper transcripts
