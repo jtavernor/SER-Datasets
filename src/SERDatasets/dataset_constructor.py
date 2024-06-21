@@ -43,21 +43,22 @@ class DatasetInstance(torch.utils.data.Dataset):
         self.has_individual_evaluators = has_individual_evaluators
 
         self.prepare_labels(items_to_scale=keys_to_scale)
-        with torch.no_grad():
-            self.create_kde_labels() # Prepare labels will scale soft labels 
-            for k in self.labels:
-                self.labels[k]['act_variance'] = np.var(self.labels[k]['soft_act_labels'])
-                self.labels[k]['val_variance'] = np.var(self.labels[k]['soft_val_labels'])
-            if hasattr(self, 'individual_evaluators'):
-                self.variance_from_evaluator_grid()
-                self.variance_from_evaluator_knn()
+        if Config()['calculate_kde']:
+            with torch.no_grad():
+                self.create_kde_labels() # Prepare labels will scale soft labels 
+                for k in self.labels:
+                    self.labels[k]['act_variance'] = np.var(self.labels[k]['soft_act_labels'])
+                    self.labels[k]['val_variance'] = np.var(self.labels[k]['soft_val_labels'])
+                if hasattr(self, 'individual_evaluators'):
+                    self.variance_from_evaluator_grid()
+                    self.variance_from_evaluator_knn()
 
     def variance_from_evaluator_grid(self):
         # If we want to use the 9 regions as variance uncomment following
         act_grid = {e: {0:{0:[],1:[],2:[]},1:{0:[],1:[],2:[]},2:{0:[],1:[],2:[]}} for e in self.individual_evaluators}
         val_grid = {e: {0:{0:[],1:[],2:[]},1:{0:[],1:[],2:[]},2:{0:[],1:[],2:[]}} for e in self.individual_evaluators}
         mapping = {e: {} for e in self.individual_evaluators}
-        for e in self.individual_evaluators:
+        for e in tqdm(self.individual_evaluators, desc='calculating evaluator grid variance'):
             for k in self.individual_evaluators[e]:
                 act,val = self.individual_evaluators[e][k]['act'], self.individual_evaluators[e][k]['val']
                 if act < -1/3:
@@ -104,7 +105,7 @@ class DatasetInstance(torch.utils.data.Dataset):
                         distances[e][k][distance] = []
                     distances[e][k][distance].append(l)
         # Now pick the 5 nearest samples
-        for k in self.labels:
+        for k in tqdm(self.labels, desc=f'calculating variance from {num_k} nearest samples'):
             evaluator_act_vars = {}
             evaluator_val_vars = {}
             for e in self.labels[k]['evaluators']:
