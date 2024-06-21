@@ -331,6 +331,7 @@ class DatasetConstructor:
                 del self.labels[key]
 
     def load(self, load_path):
+        changed_config_requires_save = False
         with open(load_path, 'rb') as f:
             loaded_attributes = pickle.load(f)
             for key in self.config:
@@ -340,12 +341,22 @@ class DatasetConstructor:
                 if 'directory' in key and self.config[key] != loaded_attributes['config'][key]:
                     print('WARNING dataset path mismatch. If new data path does not change stored data ignore this warning.')
                     print('If using an updated dataset, then delete the cached dataset file and regenerate')
+                    changed_config_requires_save = True
+                    continue
+                if key not in loaded_attributes['config']:
+                    print('POSSIBLE ERROR: Found a new config that was missing from old config')
+                    print('if this new config setting doesn\'t affect cached dataset ignore this error')
+                    changed_config_requires_save = True
                     continue
                 assert self.config[key] == loaded_attributes['config'][key], f'Value mismatch for data_config.yaml value {key}. Current run wants {self.config[key]}, while the dataset was cached with value {loaded_attributes["config"][key]}'
             for key in loaded_attributes:
                 if key == 'config':
                     continue # Don't overwrite the current config file 
                 setattr(self, key, loaded_attributes[key])
+        if changed_config_requires_save:
+            print('To prevent constant warnings printing on each run for non-errors, the config will now be rewritten.')
+            print('if you are not sure that the warnings can be ignored delete the cached dataset file and re-run')
+            self.save(load_path)
 
     def save(self, save_path):
         with open(save_path, 'wb') as f:
