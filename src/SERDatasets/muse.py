@@ -71,7 +71,7 @@ class MuSEDatasetConstructor(DatasetConstructor):
         return ['act', 'val']
 
     def get_wavs(self):
-        non_stressed_wavs = glob(os.path.join(self.muse_directory, 'Non Stressed', 'Audio', 'Non Stressed Question Monologue Audio*', '*.wav'))
+        non_stressed_wavs = glob(os.path.join(self.muse_directory, 'NotStressed', 'Audio', 'Non Stressed Question Monologue Audio*', '*.wav'))
         stressed_wavs = glob(os.path.join(self.muse_directory, 'Stressed', 'Audio', 'Stressed Question Monologue Audio', '*.wav'))
         label_id_to_wav = {
             wav_path.split('/')[-1].replace('.wav', ''): wav_path for wav_path in non_stressed_wavs
