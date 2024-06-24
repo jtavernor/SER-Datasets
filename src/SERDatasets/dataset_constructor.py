@@ -453,7 +453,8 @@ class DatasetConstructor:
         with mp_thread.Pool(num_workers) as pool:
             for _ in tqdm(pool.imap_unordered(self.save_speech_features, list(self.wav_keys_to_use.keys())), total=len(self.wav_keys_to_use.keys()), desc='Saving and extracting speech features'):
                 pass
-        
+        if self.muse_flag:
+            print('Min length was set to 1 second for MuSE as whisper failed to transcribe <1s')
         print(f'Removed {len(self.removed_wavs)} wav files for being too short/long')
         print(f'Wav files were {self.removed_wavs}')
         del self.removed_wavs
@@ -469,10 +470,11 @@ class DatasetConstructor:
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
         min_length = self.config['min_len']
+        self.muse_flag = False
         if self.dataset_id == 3 and self.config['use_whisper_for_muse']:
             # On MuSE all samples < 3 seconds have no whisper transcripts
             min_length = max(min_length, 1)
-            print('Setting min length for muse to 1 second')
+            self.muse_flag = True
         too_short = min_length != -1 and duration < min_length
         too_short = too_short or duration <= 0.0 # 0 length audio should be skipped
         too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
