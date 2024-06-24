@@ -8,7 +8,7 @@ class BatchCollator:
         self.initialised = False
         self.sample_types = sample_types # Override the initialise method and just use this 
         self.evaluator_mapper = evaluator_mapper
-        self.batch_evaluators = True
+        self.batch_evaluators = self.evaluator_mapper is not None
 
     def initialise(self, samples):
         sample_keys = set()
