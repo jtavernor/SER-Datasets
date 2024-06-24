@@ -468,7 +468,12 @@ class DatasetConstructor:
         self.labels[wav_key]['wav_path'] = wav_path
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
-        too_short = self.config['min_len'] != -1 and duration < self.config['min_len']
+        min_length = self.config['min_len']
+        if self.dataset_id == 3 and self.config['use_whisper_for_muse']:
+            # On MuSE all samples < 3 seconds have no whisper transcripts
+            min_length = max(min_length, 1)
+            print('Setting min length for muse to 1 second')
+        too_short = min_length != -1 and duration < min_length
         too_short = too_short or duration <= 0.0 # 0 length audio should be skipped
         too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
         if too_short or too_long:
