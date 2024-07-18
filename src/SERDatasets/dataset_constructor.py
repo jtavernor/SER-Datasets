@@ -25,12 +25,29 @@ class DatasetInstance(torch.utils.data.Dataset):
         has_individual_evaluators = hasattr(dataset_constructor, 'individual_evaluators')
         if has_individual_evaluators:
             self.individual_evaluators = {}
-        new_keys_to_use = copy.deepcopy(keys_to_use)
+        key_copy = copy.deepcopy(keys_to_use)
+        new_keys_to_use = []
+        muse_flag = False
+        for key in key_copy:
+            duration = dataset_constructor.labels[key]['duration']
+            min_length = self.config['min_len']
+            if self.dataset_id == 3 and self.config['use_whisper_for_muse']:
+                # On MuSE all samples < 3 seconds have no whisper transcripts
+                min_length = max(min_length, 1)
+                muse_flag = True
+            too_short = min_length != -1 and duration < min_length
+            too_short = too_short or duration <= 0.0 # 0 length audio should be skipped
+            too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
+
+            if too_short or too_long:
+                continue # Don't use these samples if too short/too long
+            new_keys_to_use.append(key)
+        print('Min length was set to 1 second for MuSE as whisper failed to transcribe <1s')
         self.split_keys = list(set(new_keys_to_use))
         for dict_name in dicts_to_copy:
             parent_dict = getattr(dataset_constructor, dict_name)
             new_dict = {}
-            for key in keys_to_use:
+            for key in new_keys_to_use:
                 new_dict[key] = copy.deepcopy(parent_dict[key])
             setattr(self, dict_name, new_dict)
 
@@ -41,6 +58,24 @@ class DatasetInstance(torch.utils.data.Dataset):
                         self.individual_evaluators[evaluator] = {}
                     self.individual_evaluators[evaluator][key] = dataset_constructor.individual_evaluators[evaluator][key]
         self.has_individual_evaluators = has_individual_evaluators
+
+        # Now set the dataset description embedding
+        tokenizer = AutoTokenizer.from_pretrained(self.config['text_feature_type'])
+        bert_model = AutoModel.from_pretrained(self.config['text_feature_type'])
+        if torch.cuda.is_available():
+            bert_model = bert_model.to('cuda')
+        if self.dataset_id == 0: # podcast
+            self.embedding = get_bert_embedding(Config()['podcast_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+        elif self.dataset_id == 1: # improv
+            self.embedding = get_bert_embedding(Config()['improv_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+        elif self.dataset_id == 2: # iemocap
+            self.embedding = get_bert_embedding(Config()['iemocap_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+        elif self.dataset_id == 3: # muse 
+            self.embedding = get_bert_embedding(Config()['muse_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+        else:
+            raise ValueError(f'unknown dataset id: {self.dataset_id}')
+        for key in self.labels:
+
 
         self.prepare_labels(items_to_scale=keys_to_scale)
         if Config()['calculate_kde']:
@@ -336,6 +371,9 @@ class DatasetConstructor:
         with open(load_path, 'rb') as f:
             loaded_attributes = pickle.load(f)
             for key in self.config:
+                if key == 'min_len' or key == 'max_len':
+                    # All data is cached, and then filtered when used so this can change without regenerating the config
+                    continue
                 if key == 'num_labels':
                     # num_labels is how act/val are binned and can vary without concern 
                     continue # This argument does not need to stay the same
@@ -452,9 +490,7 @@ class DatasetConstructor:
         num_workers = 2 # TODO: This value should vary based on the settings -- wav2vec2/bert better with lower number over raw values (more processing = less workers)
         with mp_thread.Pool(num_workers) as pool:
             for _ in tqdm(pool.imap_unordered(self.save_speech_features, list(self.wav_keys_to_use.keys())), total=len(self.wav_keys_to_use.keys()), desc='Saving and extracting speech features'):
-                pass
-        if self.muse_flag:
-            print('Min length was set to 1 second for MuSE as whisper failed to transcribe <1s')
+                pass           
         print(f'Removed {len(self.removed_wavs)} wav files for being too short/long')
         print(f'Wav files were {self.removed_wavs}')
         del self.removed_wavs
@@ -469,16 +505,11 @@ class DatasetConstructor:
         self.labels[wav_key]['wav_path'] = wav_path
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
-        min_length = self.config['min_len']
-        self.muse_flag = False
-        if self.dataset_id == 3 and self.config['use_whisper_for_muse']:
-            # On MuSE all samples < 3 seconds have no whisper transcripts
-            min_length = max(min_length, 1)
-            self.muse_flag = True
-        too_short = min_length != -1 and duration < min_length
-        too_short = too_short or duration <= 0.0 # 0 length audio should be skipped
-        too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
-        if too_short or too_long:
+        self.labels[wav_key]['duration'] = duration
+
+        # Calculate all audio files regardless of length, but keep record of length for removing during dataset instance construction
+        if duration <= 0.0: # 0 length audio should not be calculated 
+            print('Error found audio with 0 seconds or less of audio data:', wav_key)
             self.removed_wavs.append(wav_key)
             del self.wav_keys_to_use[wav_key]
             if wav_key in self.labels:
