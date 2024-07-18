@@ -65,18 +65,15 @@ class DatasetInstance(torch.utils.data.Dataset):
         if torch.cuda.is_available():
             bert_model = bert_model.to('cuda')
         if self.dataset_id == 0: # podcast
-            self.embedding = get_bert_embedding(Config()['podcast_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+            self.context_embedding = get_bert_embedding(Config()['podcast_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
         elif self.dataset_id == 1: # improv
-            self.embedding = get_bert_embedding(Config()['improv_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+            self.context_embedding = get_bert_embedding(Config()['improv_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
         elif self.dataset_id == 2: # iemocap
-            self.embedding = get_bert_embedding(Config()['iemocap_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+            self.context_embedding = get_bert_embedding(Config()['iemocap_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
         elif self.dataset_id == 3: # muse 
-            self.embedding = get_bert_embedding(Config()['muse_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
+            self.context_embedding = get_bert_embedding(Config()['muse_description'], bert_tokenizer=tokenizer, bert_model=bert_model)
         else:
             raise ValueError(f'unknown dataset id: {self.dataset_id}')
-        for key in self.labels:
-
-
         self.prepare_labels(items_to_scale=keys_to_scale)
         if Config()['calculate_kde']:
             with torch.no_grad():
@@ -251,7 +248,7 @@ class DatasetInstance(torch.utils.data.Dataset):
     def get_item_by_key(self, item_key):
         labels = self.labels[item_key]
         # Return a dictionary of all labels for this item + the current dataset id
-        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key]}
+        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key], 'context_embedding': self.context_embedding}
 
     def __getitem__(self, idx):
         item_key = self.split_keys[idx]
