@@ -4,6 +4,7 @@ from .dataset_constructor import DatasetConstructor
 
 class PrioriEmotionConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
+        self.dataset_name = 'PrioriEmotion'
         self.assessment_calls = pandas.read_csv('/nfs/turbo/McInnisLab/sandymn/ICASSP2023_mismatch/data/data_assess_arr.csv')
         self.personal_calls = pandas.read_csv('/nfs/turbo/McInnisLab/sandymn/ICASSP2023_mismatch/data/data_personal_arr.csv')
         self.assessment_calls['transcriptions_azure'] = self.assessment_calls['transcriptions_azure'].fillna('')

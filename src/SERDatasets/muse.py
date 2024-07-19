@@ -7,6 +7,7 @@ import pickle
 
 class MuSEDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
+        self.dataset_name = 'MuSE'
         self.muse_directory = Config()['muse_directory']
         self.use_whisper = Config()['use_whisper_for_muse']
         super().__init__(3, filter_fn, dataset_save_location)

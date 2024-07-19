@@ -10,6 +10,7 @@ import random
 
 class PodcastDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None, num_evaluations=None):
+        self.dataset_name = 'MSP-Podcast'
         self.num_evaluations = num_evaluations
         self.podcast_directory = Config()['podcast_directory']
         super().__init__(0, filter_fn, dataset_save_location)

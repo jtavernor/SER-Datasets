@@ -8,6 +8,7 @@ import numpy as np
 
 class ImprovDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
+        self.dataset_name = 'MSP-Improv'
         self.improv_directory = Config()['improv_directory']
         super().__init__(1, filter_fn, dataset_save_location)
 

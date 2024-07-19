@@ -7,6 +7,7 @@ import numpy as np
 
 class IEMOCAPDatasetConstructor(DatasetConstructor):
     def __init__(self, filter_fn=None, dataset_save_location=None):
+        self.dataset_name = 'IEMOCAP'
         self.iemocap_directory = Config()['iemocap_directory']
         super().__init__(2, filter_fn, dataset_save_location)
 

@@ -6,6 +6,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel, Wav2Vec2FeatureExtractor, Wav2Vec2Model
 from sklearn.utils.class_weight import compute_class_weight
 from .kde_probability import kde_probability_bs
+import h5py
 import multiprocessing.dummy as mp_thread
 import numpy as np
 import torch
@@ -28,6 +29,7 @@ class DatasetInstance(torch.utils.data.Dataset):
         key_copy = copy.deepcopy(keys_to_use)
         new_keys_to_use = []
         muse_flag = False
+        removed_for_length = 0
         for key in key_copy:
             duration = dataset_constructor.labels[key]['duration']
             min_length = self.config['min_len']
@@ -40,9 +42,12 @@ class DatasetInstance(torch.utils.data.Dataset):
             too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
 
             if too_short or too_long:
+                removed_for_length += 1
                 continue # Don't use these samples if too short/too long
             new_keys_to_use.append(key)
-        print('Min length was set to 1 second for MuSE as whisper failed to transcribe <1s')
+        if muse_flag:
+            print('Min length was set to 1 second for MuSE as whisper failed to transcribe <1s')
+        print(f'Removed {removed_for_length} samples for being too long/short')
         self.split_keys = list(set(new_keys_to_use))
         for dict_name in dicts_to_copy:
             parent_dict = getattr(dataset_constructor, dict_name)
@@ -50,6 +55,11 @@ class DatasetInstance(torch.utils.data.Dataset):
             for key in new_keys_to_use:
                 new_dict[key] = copy.deepcopy(parent_dict[key])
             setattr(self, dict_name, new_dict)
+
+        # Copy the audio/text features to be used from disk into memory
+        for key in new_keys_to_use:
+            self.labels[key]['audio'] = dataset_constructor.audio_features[key]
+            self.labels[key]['transcript'] = dataset_constructor.text_features[key]
 
         if has_individual_evaluators:
             for key in self.labels:
@@ -248,7 +258,8 @@ class DatasetInstance(torch.utils.data.Dataset):
     def get_item_by_key(self, item_key):
         labels = self.labels[item_key]
         # Return a dictionary of all labels for this item + the current dataset id
-        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key], 'context_embedding': self.context_embedding}
+        # Have to specifically add audio and transcript to convert them to numpy from h5py type
+        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key], 'context_embedding': self.context_embedding, 'audio': labels['audio'][:], 'transcript': labels['transcript'][:]}
 
     def __getitem__(self, idx):
         item_key = self.split_keys[idx]
@@ -265,37 +276,26 @@ class DatasetInstance(torch.utils.data.Dataset):
 # We just need a new init function for the multi domain dataset as it just combines other datasets into this
 class MultiDomainDataset(DatasetInstance):
     def __init__(self, dataset_instances, dataset_strs):
-        assert all([type(dataset) == DatasetInstance for dataset in dataset_instances]), 'MultiDomainMMFusionDataset constructor expects all provided datasets to be of type MMFusionDataset'
+        assert all([type(dataset) == DatasetInstance for dataset in dataset_instances]), 'MultiDomainDataset constructor expects all provided datasets to be of type DatasetInstance'
         assert len(dataset_instances) == len(dataset_strs), f'Expected to get same number of datasets ({len(dataset_instances)}) as dataset_strs/dataset string names ({len(dataset_strs)})'
         print('Merging datasets with id', [ds.dataset_id for ds in dataset_instances])
         print('dataset sizes:', [len(ds.split_keys) for ds in dataset_instances])
-        self.dataset_ids = {}
-        self.dataset_info = {}
+        self.merged_datasets = {}
         self.split_keys = []
-        dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
-        for dict_name in dicts_to_copy:
-            new_dict = {}
-            for i, dataset in enumerate(dataset_instances):
-                dataset_str = dataset_strs[i]
-                parent_dict = getattr(dataset, dict_name)
-                for key in parent_dict:
-                    new_key = f'{dataset_str}_{key}'
-                    new_dict[new_key] = parent_dict[key]
-                    self.dataset_info[new_key] = {'dataset_id': dataset.dataset_id, 'context_embedding': dataset.context_embedding}
-                    self.dataset_ids[new_key] = dataset.dataset_id
-                    self.split_keys.append(new_key)
-            setattr(self, dict_name, new_dict)
-
+        for i in range(len(dataset_strs)):
+            ds_str = dataset_strs[i]
+            ds = dataset_instances[i]
+            self.merged_datasets[ds_str] = ds
+            for key in ds.split_keys:
+                self.split_keys.append((ds_str, key))
         self.split_keys = list(set(self.split_keys))
 
     # Essentially the same as the base class, but instead of returning self.dataset_id return the stored sample id
     def __getitem__(self, idx):
-        item_key = self.split_keys[idx]
-        labels = self.labels[item_key]
-
+        ds_name, item_key = self.split_keys[idx]
+        print('getting', ds_name, item_key)
         # Return a dictionary of all labels for this item + the current dataset id
-        # dataset_info contains dataset_id, context_embedding 
-        return {**labels, 'item_key': item_key, **self.dataset_info[item_key]}
+        return {**self.merged_datasets[ds_name].get_item_by_key(item_key), 'dataset_name': ds_name}
 
 # This class loads all the relevant data and then returns iterable datasets for each 
 # data split
@@ -312,6 +312,9 @@ class DatasetConstructor:
         return ds
 
     def __init__(self, dataset_id, filter_fn=None, dataset_save_location=None):
+        assert dataset_save_location is not None, 'dataset save location must be set to save features to disk'
+        self.feature_cache_path = f"{'/'.join(dataset_save_location.split('/')[:-1])}/feature_cache.h5py"
+
         # If this is a singleton class that was already initialised then don't load data again
         if self._initialised:
             return
@@ -325,6 +328,9 @@ class DatasetConstructor:
                 self.load(dataset_save_location)
                 self.cleanup()
                 return
+            self.h5_file = h5py.File(self.feature_cache_path, 'a')
+            self.audio_features = self.h5_file.create_group(f'{self.dataset_name}/audio')
+            self.text_features = self.h5_file.create_group(f'{self.dataset_name}/text')
 
         assert filter_fn is None or callable(filter_fn), 'If filter_fn is defined it should be a callable function\nreturning True if a key should be kept and False if it should be deleted'
 
@@ -395,10 +401,26 @@ class DatasetConstructor:
             print('To prevent constant warnings printing on each run for non-errors, the config will now be rewritten.')
             print('if you are not sure that the warnings can be ignored delete the cached dataset file and re-run')
             self.save(load_path)
+        self.open_h5_read_only()
+
+    def close_h5(self):
+        if hasattr(self, 'h5_file'):
+            self.h5_file.close()
+            del self.h5_file
+            del self.audio_features
+            del self.text_features
+
+    def open_h5_read_only(self):
+        self.close_h5()
+        self.h5_file = h5py.File(self.feature_cache_path, 'r')
+        self.audio_features = self.h5_file[f'{self.dataset_name}/audio']
+        self.text_features = self.h5_file[f'{self.dataset_name}/text']
 
     def save(self, save_path):
+        self.close_h5()
         with open(save_path, 'wb') as f:
             pickle.dump(self.__dict__, f, pickle.HIGHEST_PROTOCOL)
+        self.load(save_path) # Load immediately to refresh h5 file as read only 
 
     def read_labels(self):
         raise NotImplementedError('Template dataset constructor called. This class should be inherited and have read_labels return a dictionary of loaded labels and a dictionary of label meta information')
@@ -505,11 +527,9 @@ class DatasetConstructor:
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
         self.labels[wav_key]['duration'] = duration
-        # TEMPORARILY ADD BACK THE MAX LENGTH TO PREVENT LARGE PODCAST DATA SIZE WITH RAW
-        too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
 
         # Calculate all audio files regardless of length, but keep record of length for removing during dataset instance construction
-        if duration <= 0.0 or too_long: # 0 length audio should not be calculated 
+        if duration <= 0.0: # 0 length audio should not be calculated 
             print('Error found audio with 0 seconds or less of audio data:', wav_key)
             self.removed_wavs.append(wav_key)
             del self.wav_keys_to_use[wav_key]
@@ -523,10 +543,10 @@ class DatasetConstructor:
             self.labels[wav_key] = {}
 
         if self.config['audio_feature_type'] == 'raw':
-            self.labels[wav_key]['audio'] = y
+            self.audio_features[wav_key] = y
         elif type(self.config['audio_feature_type']) == str:
             unpooled_audio = get_w2v2(y, sr, w2v2_extractor=self.wav2vec2_feature_extractor, w2v2_model=self.wav2vec2_model)
-            self.labels[wav_key]['audio'] = pool_w2v2(unpooled_audio)
+            self.audio_features[wav_key] = pool_w2v2(unpooled_audio)
         else:
             raise IOError(f"Uknown audio feature type {self.config['audio_feature_type']} in data_config.yaml")
 
@@ -542,10 +562,10 @@ class DatasetConstructor:
         if 'transcript_text' not in self.labels[wav_key]:
             raise NotImplementedError('TODO: Implement ASR')
         if self.config['text_feature_type'] == 'raw':
-            self.labels[wav_key]['transcript'] = self.labels[wav_key]['transcript_text']
+            self.text_features[wav_key] = self.labels[wav_key]['transcript_text']
             del self.labels[wav_key]['transcript_text']
         elif type(self.config['text_feature_type']) == str:
-            self.labels[wav_key]['transcript'] = get_bert_embedding(self.labels[wav_key]['transcript_text'], bert_tokenizer=self.tokenizer, bert_model=self.bert_model)
+            self.text_features[wav_key] = get_bert_embedding(self.labels[wav_key]['transcript_text'], bert_tokenizer=self.tokenizer, bert_model=self.bert_model)
             del self.labels[wav_key]['transcript_text']
         else:
             raise IOError(f"Uknown text feature type {self.config['audio_feature_type']} in data_config.yaml")
