@@ -270,6 +270,7 @@ class MultiDomainDataset(DatasetInstance):
         print('Merging datasets with id', [ds.dataset_id for ds in dataset_instances])
         print('dataset sizes:', [len(ds.split_keys) for ds in dataset_instances])
         self.dataset_ids = {}
+        self.dataset_info = {}
         self.split_keys = []
         dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
         for dict_name in dicts_to_copy:
@@ -280,6 +281,7 @@ class MultiDomainDataset(DatasetInstance):
                 for key in parent_dict:
                     new_key = f'{dataset_str}_{key}'
                     new_dict[new_key] = parent_dict[key]
+                    self.dataset_info[new_key] = {'dataset_id': dataset.dataset_id, 'context_embedding': dataset.context_embedding}
                     self.dataset_ids[new_key] = dataset.dataset_id
                     self.split_keys.append(new_key)
             setattr(self, dict_name, new_dict)
@@ -292,8 +294,8 @@ class MultiDomainDataset(DatasetInstance):
         labels = self.labels[item_key]
 
         # Return a dictionary of all labels for this item + the current dataset id
-        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key]}
-        return {**labels, 'item_key': item_key, 'dataset_id': self.dataset_ids[item_key]}
+        # dataset_info contains dataset_id, context_embedding 
+        return {**labels, 'item_key': item_key, **self.dataset_info[item_key]}
 
 # This class loads all the relevant data and then returns iterable datasets for each 
 # data split
@@ -503,9 +505,11 @@ class DatasetConstructor:
         y, sr = read_wav(wav_path)
         duration = librosa.get_duration(y=y, sr=sr)
         self.labels[wav_key]['duration'] = duration
+        # TEMPORARILY ADD BACK THE MAX LENGTH TO PREVENT LARGE PODCAST DATA SIZE WITH RAW
+        too_long = self.config['max_len'] != -1 and duration > self.config['max_len']
 
         # Calculate all audio files regardless of length, but keep record of length for removing during dataset instance construction
-        if duration <= 0.0: # 0 length audio should not be calculated 
+        if duration <= 0.0 or too_long: # 0 length audio should not be calculated 
             print('Error found audio with 0 seconds or less of audio data:', wav_key)
             self.removed_wavs.append(wav_key)
             del self.wav_keys_to_use[wav_key]
