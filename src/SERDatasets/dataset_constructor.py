@@ -293,7 +293,6 @@ class MultiDomainDataset(DatasetInstance):
     # Essentially the same as the base class, but instead of returning self.dataset_id return the stored sample id
     def __getitem__(self, idx):
         ds_name, item_key = self.split_keys[idx]
-        print('getting', ds_name, item_key)
         # Return a dictionary of all labels for this item + the current dataset id
         return {**self.merged_datasets[ds_name].get_item_by_key(item_key), 'dataset_name': ds_name}
 
