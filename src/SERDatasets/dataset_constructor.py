@@ -395,6 +395,8 @@ class DatasetConstructor:
             for key in loaded_attributes:
                 if key == 'config':
                     continue # Don't overwrite the current config file 
+                if key == 'feature_cache_path':
+                    continue # Don't overwrite the path to feature cache
                 setattr(self, key, loaded_attributes[key])
         if changed_config_requires_save:
             print('To prevent constant warnings printing on each run for non-errors, the config will now be rewritten.')
