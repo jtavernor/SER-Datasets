@@ -3,12 +3,10 @@ import numpy
 import traceback
 
 class BatchCollator:
-    def __init__(self, sample_types=None, evaluator_mapper=None):
+    def __init__(self, sample_types=None):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.initialised = False
         self.sample_types = sample_types # Override the initialise method and just use this 
-        self.evaluator_mapper = evaluator_mapper
-        self.batch_evaluators = self.evaluator_mapper is not None
 
     def initialise(self, samples):
         sample_keys = set()
@@ -67,14 +65,9 @@ class BatchCollator:
         if self.sample_types is None:
             sample_types = self.initialise(samples)
 
-        # These keys are set manually and should be skipped in the auto-batch step
-        MANUAL_SKIP_KEYS = ['evaluator_masks', 'padded_individual_evaluators_act', 'padded_individual_evaluators_act', 'act_variance_knn', 'val_variance_knn', 'act_variance_grid', 'val_variance_grid']
-
         for key in sample_types:
             # print('batching', key, 'as', sample_types[key])
             try:
-                if key in MANUAL_SKIP_KEYS:
-                    continue
                 batched_samples[key] = self.batch_values([sample[key] if key in sample else None for sample in samples], list if key == 'kde_2d_probability' else sample_types[key]) # Manually force kde_2d_probability to be returned as a list
                 # print('became', batched_samples[key])
             except TypeError as e:
@@ -84,46 +77,6 @@ class BatchCollator:
                 print(e)
                 print(traceback.print_exc())
                 batched_samples[key] = [sample[key] if key in sample else None for sample in samples]
-
-        if 'individual_evaluators_act' in sample_types and self.batch_evaluators:
-            # In this case we want to batch these with NaN values the same as the model will in training and generate a list of masks for use in model
-            # This should ensure that individual evaluator models from output line up with individual evaluator target labels
-            soft_act_labels = []
-            soft_val_labels = []
-            evaluator_masks = []
-            act_vars = []
-            val_vars = []
-            act_grid_vars = []
-            val_grid_vars = []
-            batch_mask = []
-            self.evaluator_mapper.set_get_idx()
-            for i, sample in enumerate(samples):
-                ind_act = sample['individual_evaluators_act']
-                evaluators = list(ind_act.keys())
-                ind_val = sample['individual_evaluators_val']
-                assert evaluators == list(ind_val.keys())
-                evaluator_indexes = self.evaluator_mapper[ind_act.keys()]
-                batch_mask.append(torch.as_tensor([i for _ in range(len(evaluator_indexes))]))
-                evaluator_masks.append(torch.as_tensor(evaluator_indexes, device=self.device).float())
-                soft_act_labels.append(torch.as_tensor(list(ind_act.values()), device=self.device, dtype=torch.float32))
-                soft_val_labels.append(torch.as_tensor(list(ind_val.values()), device=self.device, dtype=torch.float32))
-                act_vars.append(torch.as_tensor(list(sample['act_variance_knn'].values()), device=self.device, dtype=torch.float32))
-                val_vars.append(torch.as_tensor(list(sample['val_variance_knn'].values()), device=self.device, dtype=torch.float32))
-                act_grid_vars.append(torch.as_tensor(list(sample['act_variance_grid'].values()), device=self.device, dtype=torch.float32))
-                val_grid_vars.append(torch.as_tensor(list(sample['val_variance_grid'].values()), device=self.device, dtype=torch.float32))
-            evaluator_nan_mask = torch.nn.utils.rnn.pad_sequence(evaluator_masks, batch_first=True, padding_value=torch.nan)
-            output_mask = ~evaluator_nan_mask.isnan()
-            evaluator_nan_mask = evaluator_nan_mask[output_mask].long()
-            batch_mask = torch.cat(batch_mask)
-            soft_act_labels = torch.nn.utils.rnn.pad_sequence(soft_act_labels, batch_first=True, padding_value=torch.nan)
-            soft_val_labels = torch.nn.utils.rnn.pad_sequence(soft_val_labels, batch_first=True, padding_value=torch.nan)
-            batched_samples['evaluator_masks'] = (batch_mask, evaluator_nan_mask, output_mask)
-            batched_samples['padded_individual_evaluators_act'] = soft_act_labels
-            batched_samples['padded_individual_evaluators_val'] = soft_val_labels
-            batched_samples['act_variance_knn'] = torch.nn.utils.rnn.pad_sequence(act_vars, batch_first=True, padding_value=torch.nan)
-            batched_samples['val_variance_knn'] = torch.nn.utils.rnn.pad_sequence(val_vars, batch_first=True, padding_value=torch.nan)
-            batched_samples['act_variance_grid'] = torch.nn.utils.rnn.pad_sequence(act_grid_vars, batch_first=True, padding_value=torch.nan)
-            batched_samples['val_variance_grid'] = torch.nn.utils.rnn.pad_sequence(val_grid_vars, batch_first=True, padding_value=torch.nan)
 
         return batched_samples
 

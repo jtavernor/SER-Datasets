@@ -13,9 +13,10 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
 
     def read_labels(self):
         label_file = os.path.join(self.iemocap_directory, 'IEMOCAP_EmoEvaluation.txt')
-        get_evaluator_scores = re.compile(r'.*val\s+([1-5]\.?\d?);\s+act\s+([1-5]\.?\d?);\s+dom\s+([1-5]\.?\d?);.*')
+        get_evaluator_scores = re.compile(r'(?P<evaluator>[^:]+)?.*val\s+(?P<val>[1-5]\.?\d?);\s+act\s+(?P<act>[1-5]\.?\d?);\s+dom\s+(?P<dom>[1-5]\.?\d?);.*')
         label_info = {}
         labels = {}
+        self.individual_evaluators = {}
         with open(label_file, 'r') as file:
             section = []
             for line in file:
@@ -34,7 +35,7 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
         for label_id in label_info:
             if label_id in labels:
                 raise IOError(f'Multiple labels for the same speech {label_id}')
-            labels[label_id] = {'soft_act_labels': [], 'soft_val_labels': []}
+            labels[label_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'individual_evaluators_act': {}, 'individual_evaluators_val': {}, 'evaluators': []}
             for line in label_info[label_id]:
                 # First line contains averaged labels
                 if line.startswith('[') and line.endswith(']'):
@@ -52,8 +53,15 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                     # Attribute perception of other evaluator
                     regex_match = get_evaluator_scores.match(line)
                     if regex_match:
-                        labels[label_id]['soft_val_labels'].append(int(regex_match.group(1)))
-                        labels[label_id]['soft_act_labels'].append(int(regex_match.group(2)))
+                        labels[label_id]['soft_val_labels'].append(int(regex_match.group('val')))
+                        labels[label_id]['soft_act_labels'].append(int(regex_match.group('act')))
+                        evaluator = regex_match.group('evaluator')
+                        if evaluator not in self.individual_evaluators:
+                            self.individual_evaluators[evaluator] = {}
+                        self.individual_evaluators[evaluator][label_id] = {'act': int(regex_match.group('act')), 'val': int(regex_match.group('val'))}
+                        labels[label_id]['individual_evaluators_act'][evaluator] = int(regex_match.group('act'))
+                        labels[label_id]['individual_evaluators_val'][evaluator] = int(regex_match.group('val'))
+                        labels[label_id]['evaluators'].append(evaluator)
                     else:
                         # Bad label that is not in the range 1-5 or is just blank 
                         print(f'Bad label {label_id}: {line}')
@@ -65,9 +73,16 @@ class IEMOCAPDatasetConstructor(DatasetConstructor):
                         raise IOError(f'Found multiple self-report scores for {label_id}.')
                     regex_match = get_evaluator_scores.match(line)
                     if regex_match:
-                        labels[label_id]['self-report-val'] = float(regex_match.group(1))
-                        labels[label_id]['self-report-act'] = float(regex_match.group(2))
+                        labels[label_id]['self-report-val'] = float(regex_match.group('val'))
+                        labels[label_id]['self-report-act'] = float(regex_match.group('act'))
                         # labels[label_id]['self-report-dom'] = float(regex_match.group(3))
+                        evaluator = regex_match.group('evaluator')
+                        if evaluator not in self.individual_evaluators:
+                            self.individual_evaluators[evaluator] = {}
+                        self.individual_evaluators[evaluator][label_id] = {'act': int(regex_match.group('act')), 'val': int(regex_match.group('val'))}
+                        labels[label_id]['individual_evaluators_act'][evaluator] = int(regex_match.group('act'))
+                        labels[label_id]['individual_evaluators_val'][evaluator] = int(regex_match.group('val'))
+                        labels[label_id]['evaluators'].append(evaluator)
                     else:
                         # Bad label that is not in the range 1-5 or is just blank 
                         print(f'Bad label {label_id}: {line}')

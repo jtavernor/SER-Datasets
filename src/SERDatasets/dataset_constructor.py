@@ -328,6 +328,8 @@ class DatasetConstructor:
                 self.cleanup()
                 return
             self.h5_file = h5py.File(self.feature_cache_path, 'a')
+            if f'{self.dataset_name}/audio' in self.h5_file:
+                del self.h5_file[f'{self.dataset_name}/audio'], self.h5_file[f'{self.dataset_name}/text']
             self.audio_features = self.h5_file.create_group(f'{self.dataset_name}/audio')
             self.text_features = self.h5_file.create_group(f'{self.dataset_name}/text')
 
