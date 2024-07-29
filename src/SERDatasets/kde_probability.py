@@ -12,7 +12,7 @@ def noise(std, precision):
     return (-2*max_noise)*torch.rand(std.shape,device=std.device,dtype=precision) + max_noise
     # return np.random.uniform(-max_noise, max_noise, 1)[0]
 
-# Expect input of soft_act: batch_size x max_num_evaluators
+# Expect input of soft_act: batch_size x max_num_annotators
 # for batched samples that don't have evaluations from all evaluations these values should be torch.nan
 def get_random_observations_fast(soft_act, soft_val, n=200, precision=torch.float64):
     device = soft_act.device
@@ -33,28 +33,28 @@ def get_random_observations_fast(soft_act, soft_val, n=200, precision=torch.floa
         batch_act = batch_act[~batch_act.isnan()]
         batch_val = batch_val[~batch_val.isnan()]
 
-        # Calculate the max number of evaluators for this data 
+        # Calculate the max number of annotators for this data 
         max_n = len(batch_act)
 
         # Expand the batches to have n copies of the data 
         eb_act = batch_act.unsqueeze(dim=0).repeat([n,1])
         eb_val = batch_val.unsqueeze(dim=0).repeat([n,1])
 
-        # Now randomly shuffle the order of evaluators in each of these n copies of the data
+        # Now randomly shuffle the order of annotators in each of these n copies of the data
         label_permutations = torch.stack([torch.randperm(max_n) for _ in range(n)]).to(device)
         shuffled_act = torch.gather(eb_act, dim=-1, index=label_permutations)
         shuffled_val = torch.gather(eb_val, dim=-1, index=label_permutations)
 
-        # For each copy of the data, randomly use up to max_n evaluators in each
+        # For each copy of the data, randomly use up to max_n annotators in each
         num_labels_to_use = torch.randint(low=1, high=max_n+1, size=[200], device=device)
 
         # Calculate a numerical index [[0,1,2,...,max_n], [0,1,2,...,max_n]... (n times)]
         # Then when these are < num_labels_to_use we want to use that label
-        # Since data was shuffled earlier this will ensure that selecting e.g. label 0 in this case will not always correspond to the first evaluator provided
+        # Since data was shuffled earlier this will ensure that selecting e.g. label 0 in this case will not always correspond to the first annotator provided
         indexes = torch._dim_arange(shuffled_act, dim=-1).unsqueeze(dim=0).repeat([n,1])
         indexes = indexes < num_labels_to_use.unsqueeze(dim=-1)
 
-        # Inverse the selection to overwrite evaluators not to be used in observation with torch.nan as nanmean can then be used to ignore this value 
+        # Inverse the selection to overwrite annotators not to be used in observation with torch.nan as nanmean can then be used to ignore this value 
         shuffled_act[~indexes] = torch.nan
         shuffled_val[~indexes] = torch.nan
 

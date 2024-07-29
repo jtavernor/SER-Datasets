@@ -16,9 +16,9 @@ class ImprovDatasetConstructor(DatasetConstructor):
         lab_file = os.path.join(self.improv_directory, "Evaluation.txt")
         evaluation_line_matcher = re.compile(r'UTD-IMPROV-(?P<utt_id>[A-Z0-9\-]+)\.avi;\s+(?P<cat_lbl>\w);\s+A:(?P<act_lbl>\d+\.\d+)\s*;\s+V:(?P<val_lbl>\d+\.\d+)\s*;\s+D:(?P<dom_lbl>\d+\.\d+|NaN)\s*;.*')
         utterance_matcher = re.compile(r'MSP-IMPROV-S(?P<sentence>\d\d)(?P<intended_emotion>[AHSN])-(?P<speaker>(?P<gender>[MF])\d\d)-(?P<scenario>[PRST])-(?P<listener>[FM])(?P<dyadic_speaker>[FM])(?P<turn_number>\d\d)')
-        soft_matcher = re.compile(r'(?P<evaluator>[A-Za-z\-0-9_]+);\s(?P<cat_emotion>[A-Za-z]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+|NaN);\sN:(?P<naturalness>[0-9.]+|NaN);')
+        soft_matcher = re.compile(r'(?P<annotator>[A-Za-z\-0-9_]+);\s(?P<cat_emotion>[A-Za-z]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+|NaN);\sN:(?P<naturalness>[0-9.]+|NaN);')
         labels = {}
-        self.individual_evaluators = {}
+        self.individual_annotators = {}
 
         utterances_with_duplicates = []
         with open(lab_file, 'r') as r:
@@ -33,7 +33,7 @@ class ImprovDatasetConstructor(DatasetConstructor):
                     full_utt_id = f'MSP-IMPROV-{utt_id}'
                     current_utt = full_utt_id
                     if full_utt_id not in labels:
-                        labels[full_utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'evaluators': [], 'individual_evaluators_act': {}, 'individual_evaluators_val': {}, 'naturalness': []}
+                        labels[full_utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'annotators': [], 'individual_annotators_act': {}, 'individual_annotators_val': {}, 'naturalness': []}
                     else:
                         raise IOError(f'Encountered duplicate label {full_utt_id}')
                     labels[full_utt_id]['act'] = 6.0 - float(utt_results.group('act_lbl')) # Improv stores activation values high to low (1 to 5), not low to high so we need to flip this so that 0 is the lowest and 4 is the highest.
@@ -51,32 +51,32 @@ class ImprovDatasetConstructor(DatasetConstructor):
                     matches = soft_matcher.match(line)
                     if matches is None:
                         print(utt_id, line)
-                    evaluator = matches.group('evaluator')
-                    if evaluator not in self.individual_evaluators:
-                        self.individual_evaluators[evaluator] = {}
-                    evaluator_act = int(6.0 - float(matches.group('act')))
-                    evaluator_val = int(float(matches.group('val')))
-                    labels[current_utt]['soft_act_labels'].append(evaluator_act)
-                    labels[current_utt]['soft_val_labels'].append(evaluator_val)
-                    if evaluator in labels[current_utt]['evaluators']:
-                        print('duplicate', evaluator, 'in', current_utt, 'averaging')
-                        utterances_with_duplicates.append((current_utt, evaluator))
-                        labels[current_utt]['individual_evaluators_act'][evaluator] = [labels[current_utt]['individual_evaluators_act'][evaluator]] + [evaluator_act]
-                        labels[current_utt]['individual_evaluators_val'][evaluator] = [labels[current_utt]['individual_evaluators_val'][evaluator]] + [evaluator_val]
+                    annotator = matches.group('annotator')
+                    if annotator not in self.individual_annotators:
+                        self.individual_annotators[annotator] = {}
+                    annotator_act = int(6.0 - float(matches.group('act')))
+                    annotator_val = int(float(matches.group('val')))
+                    labels[current_utt]['soft_act_labels'].append(annotator_act)
+                    labels[current_utt]['soft_val_labels'].append(annotator_val)
+                    if annotator in labels[current_utt]['annotators']:
+                        print('duplicate', annotator, 'in', current_utt, 'averaging')
+                        utterances_with_duplicates.append((current_utt, annotator))
+                        labels[current_utt]['individual_annotators_act'][annotator] = [labels[current_utt]['individual_annotators_act'][annotator]] + [annotator_act]
+                        labels[current_utt]['individual_annotators_val'][annotator] = [labels[current_utt]['individual_annotators_val'][annotator]] + [annotator_val]
                         continue
-                    labels[current_utt]['evaluators'].append(evaluator)
-                    labels[current_utt]['individual_evaluators_act'][evaluator] = evaluator_act
-                    labels[current_utt]['individual_evaluators_val'][evaluator] = evaluator_val
+                    labels[current_utt]['annotators'].append(annotator)
+                    labels[current_utt]['individual_annotators_act'][annotator] = annotator_act
+                    labels[current_utt]['individual_annotators_val'][annotator] = annotator_val
                     labels[current_utt]['naturalness'].append(matches.group('naturalness'))
-                    self.individual_evaluators[evaluator][current_utt] = {'act': evaluator_act, 'val': evaluator_val}
+                    self.individual_annotators[annotator][current_utt] = {'act': annotator_act, 'val': annotator_val}
 
-        for utt_id, evaluator in set(utterances_with_duplicates):
-            print(utt_id, evaluator)
-            sub_act = labels[utt_id]['individual_evaluators_act'][evaluator]
-            sub_val = labels[utt_id]['individual_evaluators_val'][evaluator]
+        for utt_id, annotator in set(utterances_with_duplicates):
+            print(utt_id, annotator)
+            sub_act = labels[utt_id]['individual_annotators_act'][annotator]
+            sub_val = labels[utt_id]['individual_annotators_val'][annotator]
             print(sub_act, sub_val)
-            evaluator_act = np.mean(sub_act).item()
-            evaluator_val = np.mean(sub_val).item()
+            annotator_act = np.mean(sub_act).item()
+            annotator_val = np.mean(sub_val).item()
             curr_len = len(labels[utt_id]['soft_act_labels'])
             print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
             for act in sub_act:
@@ -88,52 +88,52 @@ class ImprovDatasetConstructor(DatasetConstructor):
                 labels[utt_id]['soft_val_labels'].remove(val)
                 curr_len -= 1
                 assert len(labels[utt_id]['soft_val_labels']) == curr_len
-            labels[utt_id]['soft_act_labels'].append(evaluator_act)
-            labels[utt_id]['soft_val_labels'].append(evaluator_val)
+            labels[utt_id]['soft_act_labels'].append(annotator_act)
+            labels[utt_id]['soft_val_labels'].append(annotator_val)
             print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
-            labels[utt_id]['individual_evaluators_act'][evaluator] = evaluator_act
-            labels[utt_id]['individual_evaluators_val'][evaluator] = evaluator_val
+            labels[utt_id]['individual_annotators_act'][annotator] = annotator_act
+            labels[utt_id]['individual_annotators_val'][annotator] = annotator_val
             labels[utt_id]['act'] = np.mean(labels[utt_id]['soft_act_labels']).item()
             labels[utt_id]['val'] = np.mean(labels[utt_id]['soft_val_labels']).item()
-            self.individual_evaluators[evaluator][utt_id] = {'act': evaluator_act, 'val': evaluator_val}
+            self.individual_annotators[annotator][utt_id] = {'act': annotator_act, 'val': annotator_val}
 
         too_few_evaluations = []
-        for evaluator in self.individual_evaluators:
-            num_evals = len(self.individual_evaluators[evaluator].keys())
+        for annotator in self.individual_annotators:
+            num_evals = len(self.individual_annotators[annotator].keys())
             if num_evals < 0:
-                too_few_evaluations.append(evaluator)
+                too_few_evaluations.append(annotator)
 
         self.too_few_evaluations = set(too_few_evaluations) # Use this to amend target labels during training when using new method
-        removed_evaluators = len(self.too_few_evaluations)
-        for evaluator in tqdm(self.too_few_evaluations, desc='Adjusting labels to remove evaluators with less than 50 evaluations'):
-            eval_ratings = self.individual_evaluators[evaluator]
+        removed_annotators = len(self.too_few_evaluations)
+        for annotator in tqdm(self.too_few_evaluations, desc='Adjusting labels to remove annotators with less than 50 evaluations'):
+            eval_ratings = self.individual_annotators[annotator]
             for utt_id in eval_ratings:
                 eval_act = eval_ratings[utt_id]['act']
                 eval_val = eval_ratings[utt_id]['val']
-                labels[utt_id]['evaluators'].remove(evaluator)
-                assert evaluator not in labels[utt_id]['evaluators']
+                labels[utt_id]['annotators'].remove(annotator)
+                assert annotator not in labels[utt_id]['annotators']
                 labels[utt_id]['soft_act_labels'].remove(eval_act)
                 labels[utt_id]['soft_val_labels'].remove(eval_val)
-                del labels[utt_id]['individual_evaluators_act'][evaluator]
-                del labels[utt_id]['individual_evaluators_val'][evaluator]
-                # If there are no more evaluators for this utterance remove 
+                del labels[utt_id]['individual_annotators_act'][annotator]
+                del labels[utt_id]['individual_annotators_val'][annotator]
+                # If there are no more annotators for this utterance remove 
                 # Now correct the labels mean values 
                 labels[utt_id]['act'] = np.mean(labels[utt_id]['soft_act_labels']).item()
                 labels[utt_id]['val'] = np.mean(labels[utt_id]['soft_val_labels']).item()
-            del self.individual_evaluators[evaluator]
+            del self.individual_annotators[annotator]
 
-        # Remove labels that no longer have enough evaluators
+        # Remove labels that no longer have enough annotators
         removed_utterances = 0
         removed_utterances2 = 0
         for utt_id in list(labels.keys()):
-            if len(labels[utt_id]['evaluators']) < 2:
+            if len(labels[utt_id]['annotators']) < 2:
                 removed_utterances += 1
-                if len(labels[utt_id]['evaluators']):
+                if len(labels[utt_id]['annotators']):
                     removed_utterances2 += 1
                 del labels[utt_id]
                 continue
 
-        print(f'Removed {removed_evaluators} evaluators who annotated less than 50 samples. Removed {removed_utterances} ({removed_utterances2}) utterances that no longer had any annotators (or had 1 annotator).')
+        print(f'Removed {removed_annotators} annotators who annotated less than 50 samples. Removed {removed_utterances} ({removed_utterances2}) utterances that no longer had any annotators (or had 1 annotator).')
 
         # Now load transcripts for each label 
         for key in list(labels.keys()):

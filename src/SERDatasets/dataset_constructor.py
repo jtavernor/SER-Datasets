@@ -23,9 +23,9 @@ class DatasetInstance(torch.utils.data.Dataset):
         self.dataset_ids = {key: self.dataset_id for key in keys_to_use}
         self.kde_size = kde_size
         dicts_to_copy = ['wav_lengths', 'wav_rms', 'labels']
-        has_individual_evaluators = hasattr(dataset_constructor, 'individual_evaluators')
-        if has_individual_evaluators:
-            self.individual_evaluators = {}
+        has_individual_annotators = hasattr(dataset_constructor, 'individual_annotators')
+        if has_individual_annotators:
+            self.individual_annotators = {}
         key_copy = copy.deepcopy(keys_to_use)
         new_keys_to_use = []
         muse_flag = False
@@ -61,13 +61,13 @@ class DatasetInstance(torch.utils.data.Dataset):
             self.labels[key]['audio'] = dataset_constructor.audio_features[key]
             self.labels[key]['transcript'] = dataset_constructor.text_features[key]
 
-        if has_individual_evaluators:
+        if has_individual_annotators:
             for key in self.labels:
-                for evaluator in self.labels[key]['evaluators']:
-                    if evaluator not in self.individual_evaluators:
-                        self.individual_evaluators[evaluator] = {}
-                    self.individual_evaluators[evaluator][key] = dataset_constructor.individual_evaluators[evaluator][key]
-        self.has_individual_evaluators = has_individual_evaluators
+                for annotator in self.labels[key]['annotators']:
+                    if annotator not in self.individual_annotators:
+                        self.individual_annotators[annotator] = {}
+                    self.individual_annotators[annotator][key] = dataset_constructor.individual_annotators[annotator][key]
+        self.has_individual_annotators = has_individual_annotators
 
         # Now set the dataset description embedding
         tokenizer = AutoTokenizer.from_pretrained(self.config['text_feature_type'])
@@ -95,11 +95,11 @@ class DatasetInstance(torch.utils.data.Dataset):
     def create_kde_labels(self):
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         # Build the large nan-filled soft_act and soft_val labels for kde calculation
-        # First calculate the maximum number of evaluators in the dataset so that other samples can be padded with torch.nan
-        if self.has_individual_evaluators:
-            max_num_evaluators = max(len(self.labels[sample]['evaluators']) for sample in self.labels)
+        # First calculate the maximum number of annotators in the dataset so that other samples can be padded with torch.nan
+        if self.has_individual_annotators:
+            max_num_annotators = max(len(self.labels[sample]['annotators']) for sample in self.labels)
         else:
-            max_num_evaluators = max(len(self.labels[sample]['soft_act_labels']) for sample in self.labels)
+            max_num_annotators = max(len(self.labels[sample]['soft_act_labels']) for sample in self.labels)
         samples = list(self.labels.keys())
         batch_size=256
         total_samples = len(self.labels)
@@ -110,8 +110,8 @@ class DatasetInstance(torch.utils.data.Dataset):
             end = min((i+1)*batch_size, total_samples)
             curr_bs = end-start
             batched_examples = samples[start:end]
-            soft_act = torch.stack([torch.as_tensor(self.labels[sample]['soft_act_labels'] + [torch.nan]*(max_num_evaluators-len(self.labels[sample]['soft_act_labels'])), device=device).float() for sample in batched_examples], dim=0)
-            soft_val = torch.stack([torch.as_tensor(self.labels[sample]['soft_val_labels'] + [torch.nan]*(max_num_evaluators-len(self.labels[sample]['soft_val_labels'])), device=device).float() for sample in batched_examples], dim=0)
+            soft_act = torch.stack([torch.as_tensor(self.labels[sample]['soft_act_labels'] + [torch.nan]*(max_num_annotators-len(self.labels[sample]['soft_act_labels'])), device=device).float() for sample in batched_examples], dim=0)
+            soft_val = torch.stack([torch.as_tensor(self.labels[sample]['soft_val_labels'] + [torch.nan]*(max_num_annotators-len(self.labels[sample]['soft_val_labels'])), device=device).float() for sample in batched_examples], dim=0)
             kde_2d_prob = kde_probability_bs(soft_act, soft_val, use_soft_histogram=False, prob_grid_size=self.kde_size, temperature=512, density_grid_size=512, precision=torch.float64)
             negs = kde_2d_prob < 0
             if negs.any():
@@ -145,11 +145,11 @@ class DatasetInstance(torch.utils.data.Dataset):
                 min_val = float(min(min_val, min(all_soft_values)))
                 max_val = float(max(max_val, max(all_soft_values)))
                 
-                if hasattr(self, 'individual_evaluators'):
-                    # Also scale the individual evaluator values
-                    for evaluator in self.individual_evaluators:
-                        for utt_id in self.individual_evaluators[evaluator]:
-                            self.individual_evaluators[evaluator][utt_id][value_type] = (new_maximum-new_minimum) * (self.individual_evaluators[evaluator][utt_id][value_type] - min_val)/(max_val - min_val) + new_minimum
+                if hasattr(self, 'individual_annotators'):
+                    # Also scale the individual annotator values
+                    for annotator in self.individual_annotators:
+                        for utt_id in self.individual_annotators[annotator]:
+                            self.individual_annotators[annotator][utt_id][value_type] = (new_maximum-new_minimum) * (self.individual_annotators[annotator][utt_id][value_type] - min_val)/(max_val - min_val) + new_minimum
 
             buckets = np.linspace(new_minimum, new_maximum, num=num_bins+1)
             for key in self.split_keys:
@@ -161,11 +161,11 @@ class DatasetInstance(torch.utils.data.Dataset):
                     soft_key = f'soft_{value_type}_labels'
                     if soft_key in values:
                         self.labels[key][soft_key] = [(new_maximum-new_minimum) * (soft_rating - min_val)/(max_val - min_val) + new_minimum for soft_rating in self.labels[key][soft_key]]
-                    individual_evaluators_key = f'individual_evaluators_{value_type}'
-                    if individual_evaluators_key in values:
-                        for evaluator in self.labels[key][individual_evaluators_key]:
-                            evaluator_rating = self.labels[key][individual_evaluators_key][evaluator]
-                            self.labels[key][individual_evaluators_key][evaluator] = (new_maximum-new_minimum) * (evaluator_rating - min_val)/(max_val - min_val) + new_minimum
+                    individual_annotators_key = f'individual_annotators_{value_type}'
+                    if individual_annotators_key in values:
+                        for annotator in self.labels[key][individual_annotators_key]:
+                            annotator_rating = self.labels[key][individual_annotators_key][annotator]
+                            self.labels[key][individual_annotators_key][annotator] = (new_maximum-new_minimum) * (annotator_rating - min_val)/(max_val - min_val) + new_minimum
 
                 if value_type in values:
                     self.labels[key][value_type] = (new_maximum-new_minimum) * (values[value_type] - min_val)/(max_val - min_val) + new_minimum
@@ -355,19 +355,19 @@ class DatasetConstructor:
             return load_json(data_split_type)
         return data_split_type # Whatever inherits this template should override this method and handle the string
 
-    def build(self, data_split_type=None, kde_size=5, test_only=False, remove_evaluators_with_few_evaluations=False, only_keep_evaluators=False, sampling=None, **kwargs):
-        if remove_evaluators_with_few_evaluations:
-            # Need to remove these bad evaluators before calculation, in this case will also adjust the mean act/val ground truth
-            for evaluator in self.too_few_evaluations:
-                for utt_id in self.individual_evaluators[evaluator]:
-                    self.labels[utt_id]['soft_act_labels'].remove(self.individual_evaluators[evaluator][utt_id]['act'])
-                    self.labels[utt_id]['soft_val_labels'].remove(self.individual_evaluators[evaluator][utt_id]['val'])
-                    self.labels[utt_id]['evaluators'].remove(evaluator)
-                    del self.labels[utt_id]['individual_evaluators_act'][evaluator]
-                    del self.labels[utt_id]['individual_evaluators_val'][evaluator]
+    def build(self, data_split_type=None, kde_size=5, test_only=False, remove_annotators_with_few_evaluations=False, only_keep_annotators=False, sampling=None, **kwargs):
+        if remove_annotators_with_few_evaluations:
+            # Need to remove these bad annotators before calculation, in this case will also adjust the mean act/val ground truth
+            for annotator in self.too_few_evaluations:
+                for utt_id in self.individual_annotators[annotator]:
+                    self.labels[utt_id]['soft_act_labels'].remove(self.individual_annotators[annotator][utt_id]['act'])
+                    self.labels[utt_id]['soft_val_labels'].remove(self.individual_annotators[annotator][utt_id]['val'])
+                    self.labels[utt_id]['annotators'].remove(annotator)
+                    del self.labels[utt_id]['individual_annotators_act'][annotator]
+                    del self.labels[utt_id]['individual_annotators_val'][annotator]
                     self.labels[utt_id]['act'] = np.mean(self.labels[utt_id]['soft_act_labels'])
                     self.labels[utt_id]['val'] = np.mean(self.labels[utt_id]['soft_val_labels'])
-                del self.individual_evaluators[evaluator]
+                del self.individual_annotators[annotator]
 
         keys_to_scale = self.prepare_labels()
         split_dict = self.get_dataset_splits(data_split_type, **kwargs)

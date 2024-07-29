@@ -25,10 +25,10 @@ class PodcastDatasetConstructor(DatasetConstructor):
             self.podcast_v = '1.11'
         detailed_lab_file = os.path.join(self.podcast_directory, "Labels", "labels_detailed.csv")
         evaluation_line_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,(?P<cat_lbl>\w),(?P<act_lbl>\d+\.\d+),(?P<val_lbl>\d+\.\d+),(?P<dom_lbl>\d+\.\d+),(?P<spkr_id>\d+|Unknown),(?P<gender>Male|Female|Unknown),(?P<split>Train|Validation|Development|Test1|Test2)')
-        soft_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,"?(?P<evaluator>WORKER\d+);\s(?P<cat_emotion>[A-Za-z() \-|/;.?"!:\[\]&,\s\d_]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]&\s\d],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+);"?')
+        soft_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,"?(?P<annotator>WORKER\d+);\s(?P<cat_emotion>[A-Za-z() \-|/;.?"!:\[\]&,\s\d_]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]&\s\d],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+);"?')
         df_lst = []
         labels = {}
-        self.individual_evaluators = {}
+        self.individual_annotators = {}
         with open(lab_file, 'r') as r:
             for line in r.readlines():
                 line=line.rstrip()
@@ -38,7 +38,7 @@ class PodcastDatasetConstructor(DatasetConstructor):
                         raise IOError(f'Failed to read values from line: {line}')
                     utt_id = utt_results.group('utt_id')
                     if utt_id not in labels:
-                        labels[utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'evaluators': [], 'individual_evaluators_act': {}, 'individual_evaluators_val': {}}
+                        labels[utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'annotators': [], 'individual_annotators_act': {}, 'individual_annotators_val': {}}
                     else:
                         raise IOError(f'Encountered duplicate label {utt_id}')
                     labels[utt_id]['act'] = float(utt_results.group('act_lbl')) # Improv stores activation values high to low (1 to 5), not low to high so we need to flip this so that 0 is the lowest and 4 is the highest.
@@ -74,32 +74,32 @@ class PodcastDatasetConstructor(DatasetConstructor):
                     raise IOError(f'Unable to match soft labels in line: {line}')
                 labels[m.group('utt_id')]['soft_act_labels'].append(int(float(m.group('act'))))
                 labels[m.group('utt_id')]['soft_val_labels'].append(int(float(m.group('val'))))
-                evaluator = m.group('evaluator')
-                if evaluator in labels[m.group('utt_id')]['evaluators']:
-                    print('duplicate', evaluator, 'in', m.group('utt_id'), 'averaging')
-                    utterances_with_duplicates.append((m.group('utt_id'), evaluator))
-                    if type(labels[m.group('utt_id')]['individual_evaluators_act'][evaluator]) != list:
-                        labels[m.group('utt_id')]['individual_evaluators_act'][evaluator] = [labels[m.group('utt_id')]['individual_evaluators_act'][evaluator]]
-                        labels[m.group('utt_id')]['individual_evaluators_val'][evaluator] = [labels[m.group('utt_id')]['individual_evaluators_val'][evaluator]]
+                annotator = m.group('annotator')
+                if annotator in labels[m.group('utt_id')]['annotators']:
+                    print('duplicate', annotator, 'in', m.group('utt_id'), 'averaging')
+                    utterances_with_duplicates.append((m.group('utt_id'), annotator))
+                    if type(labels[m.group('utt_id')]['individual_annotators_act'][annotator]) != list:
+                        labels[m.group('utt_id')]['individual_annotators_act'][annotator] = [labels[m.group('utt_id')]['individual_annotators_act'][annotator]]
+                        labels[m.group('utt_id')]['individual_annotators_val'][annotator] = [labels[m.group('utt_id')]['individual_annotators_val'][annotator]]
 
-                    labels[m.group('utt_id')]['individual_evaluators_act'][evaluator].append(int(float(m.group('act'))))
-                    labels[m.group('utt_id')]['individual_evaluators_val'][evaluator].append(int(float(m.group('val'))))
+                    labels[m.group('utt_id')]['individual_annotators_act'][annotator].append(int(float(m.group('act'))))
+                    labels[m.group('utt_id')]['individual_annotators_val'][annotator].append(int(float(m.group('val'))))
                     continue
-                labels[m.group('utt_id')]['evaluators'].append(evaluator)
-                labels[m.group('utt_id')]['individual_evaluators_act'][evaluator] = int(float(m.group('act')))
-                labels[m.group('utt_id')]['individual_evaluators_val'][evaluator] = int(float(m.group('val')))
+                labels[m.group('utt_id')]['annotators'].append(annotator)
+                labels[m.group('utt_id')]['individual_annotators_act'][annotator] = int(float(m.group('act')))
+                labels[m.group('utt_id')]['individual_annotators_val'][annotator] = int(float(m.group('val')))
                 # labels[m.group('utt_id')]['soft_dom_label'].append(float(m.group('dom')))
-                if evaluator not in self.individual_evaluators:
-                    self.individual_evaluators[evaluator] = {}
-                self.individual_evaluators[evaluator][m.group('utt_id')] = {'act': int(float(m.group('act'))), 'val': int(float(m.group('val')))}
+                if annotator not in self.individual_annotators:
+                    self.individual_annotators[annotator] = {}
+                self.individual_annotators[annotator][m.group('utt_id')] = {'act': int(float(m.group('act'))), 'val': int(float(m.group('val')))}
 
-        for utt_id, evaluator in set(utterances_with_duplicates):
-            print(utt_id, evaluator)
-            sub_act = labels[utt_id]['individual_evaluators_act'][evaluator]
-            sub_val = labels[utt_id]['individual_evaluators_val'][evaluator]
+        for utt_id, annotator in set(utterances_with_duplicates):
+            print(utt_id, annotator)
+            sub_act = labels[utt_id]['individual_annotators_act'][annotator]
+            sub_val = labels[utt_id]['individual_annotators_val'][annotator]
             print(sub_act, sub_val)
-            evaluator_act = np.mean(sub_act).item()
-            evaluator_val = np.mean(sub_val).item()
+            annotator_act = np.mean(sub_act).item()
+            annotator_val = np.mean(sub_val).item()
             curr_len = len(labels[utt_id]['soft_act_labels'])
             print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
             for act in sub_act:
@@ -111,14 +111,14 @@ class PodcastDatasetConstructor(DatasetConstructor):
                 labels[utt_id]['soft_val_labels'].remove(val)
                 curr_len -= 1
                 assert len(labels[utt_id]['soft_val_labels']) == curr_len
-            labels[utt_id]['soft_act_labels'].append(evaluator_act)
-            labels[utt_id]['soft_val_labels'].append(evaluator_val)
+            labels[utt_id]['soft_act_labels'].append(annotator_act)
+            labels[utt_id]['soft_val_labels'].append(annotator_val)
             print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
-            labels[utt_id]['individual_evaluators_act'][evaluator] = evaluator_act
-            labels[utt_id]['individual_evaluators_val'][evaluator] = evaluator_val
+            labels[utt_id]['individual_annotators_act'][annotator] = annotator_act
+            labels[utt_id]['individual_annotators_val'][annotator] = annotator_val
             labels[utt_id]['act'] = np.mean(labels[utt_id]['soft_act_labels']).item()
             labels[utt_id]['val'] = np.mean(labels[utt_id]['soft_val_labels']).item()
-            self.individual_evaluators[evaluator][utt_id] = {'act': evaluator_act, 'val': evaluator_val}
+            self.individual_annotators[annotator][utt_id] = {'act': annotator_act, 'val': annotator_val}
 
         # Now load transcripts for each label 
         transcripts = {}
