@@ -24,7 +24,7 @@ def clamp_mfb(mfb):
     mfb[mfb<-clampVal] = -clampVal
     return mfb
 
-def get_w2v2(y, sr, w2v2_extractor, w2v2_model, upsample=False):
+def get_w2v2(y, sr, w2v2_extractor, w2v2_model, upsample=False, return_all_outputs=False):
     with torch.no_grad():
         if sr != 16000 and upsample:
             # print(f'Resampling audio from {sr} to 16000')
@@ -33,7 +33,11 @@ def get_w2v2(y, sr, w2v2_extractor, w2v2_model, upsample=False):
         if torch.cuda.is_available():
             audio_features = audio_features.to('cuda')
         assert len(audio_features) == 1
-        audio_features = w2v2_model(**audio_features)['last_hidden_state']
+        audio_features = w2v2_model(**audio_features, output_hidden_states=return_all_outputs)
+        if return_all_outputs:
+            audio_features = audio_features['hidden_states']
+        else:
+            audio_features = audio_features['last_hidden_state']
 
         return audio_features.cpu().numpy()
 

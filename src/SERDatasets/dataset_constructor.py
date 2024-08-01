@@ -250,6 +250,13 @@ class DatasetConstructor:
             if f'{self.dataset_name}/audio' in self.h5_file:
                 del self.h5_file[f'{self.dataset_name}/audio'], self.h5_file[f'{self.dataset_name}/text']
             self.audio_features = self.h5_file.create_group(f'{self.dataset_name}/audio')
+            if self.config['wav2vec2_caching']:
+                self.w2v2_cached_layers = (10, 13) # Cache layers 9,10,11,12 (the +1 is from added embedding at start of output)
+                # The hidden states output of wav2vec2 will have index 0: embedding, index 12: final output layer, no point caching either of these, so do 1-12
+                self.wav2vec2_cache = {
+                    i: self.h5_file.create_group(f'{self.dataset_name}/w2v2_cache_layer_{i}') for i in range(self.w2v2_cached_layers)
+                }
+                self.wav2vec2_cache['raw'] = self.h5_file.create_group(f'{self.dataset_name}/w2v2_cache_layer_raw') # Also want to cache the raw audio 
             self.text_features = self.h5_file.create_group(f'{self.dataset_name}/text')
 
         assert filter_fn is None or callable(filter_fn), 'If filter_fn is defined it should be a callable function\nreturning True if a key should be kept and False if it should be deleted'
@@ -336,6 +343,13 @@ class DatasetConstructor:
         self.close_h5()
         self.h5_file = h5py.File(self.feature_cache_path, 'r')
         self.audio_features = self.h5_file[f'{self.dataset_name}/audio']
+        if self.config['wav2vec2_caching']:
+            # The hidden states output of wav2vec2 will have index 0: embedding, index 12: final output layer, no point caching either of these, so do 1-12
+            self.wav2vec2_cache = {
+                i: self.h5_file[f'{self.dataset_name}/w2v2_cache_layer_{i}'] for i in range(self.w2v2_cached_layers)
+            }
+            self.wav2vec2_cache['raw'] = self.h5_file[f'{self.dataset_name}/w2v2_cache_layer_raw'] # Also want to cache the raw audio 
+
         self.text_features = self.h5_file[f'{self.dataset_name}/text']
 
     def save(self, save_path):
@@ -467,8 +481,16 @@ class DatasetConstructor:
         if self.config['audio_feature_type'] == 'raw':
             self.audio_features[wav_key] = y
         elif type(self.config['audio_feature_type']) == str:
-            unpooled_audio = get_w2v2(y, sr, w2v2_extractor=self.wav2vec2_feature_extractor, w2v2_model=self.wav2vec2_model)
-            self.audio_features[wav_key] = pool_w2v2(unpooled_audio)
+            if self.config['wav2vec2_caching']:
+                unpooled_audio = get_w2v2(y, sr, w2v2_extractor=self.wav2vec2_feature_extractor, w2v2_model=self.wav2vec2_model, return_all_outputs=True)
+                self.audio_features[wav_key] = pool_w2v2(unpooled_audio['last_hidden_state'])
+                assert len(unpooled_audio['hidden_states']) == self.w2v2_cached_layers[-1]
+                for i in range(self.w2v2_cached_layers):
+                    self.wav2vec2_cache[i][wav_key] = unpooled_audio['hidden_states'][i].cpu().numpy()
+                self.wav2vec2_cache['raw'][wav_key] = y
+            else:
+                unpooled_audio = get_w2v2(y, sr, w2v2_extractor=self.wav2vec2_feature_extractor, w2v2_model=self.wav2vec2_model)
+                self.audio_features[wav_key] = pool_w2v2(unpooled_audio)
         else:
             raise IOError(f"Uknown audio feature type {self.config['audio_feature_type']} in data_config.yaml")
 
