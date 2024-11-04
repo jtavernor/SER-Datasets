@@ -1,29 +1,15 @@
-import os
-import json
-import pickle
+# min_v, max_v: min and max value present in original data
+# new_min, new_max: new min and max to be min-max scaled to
+# x: value to scale
+def scale(min_v, max_v, new_min, new_max, x):
+    return new_min + (x-min_v)*(new_max-new_min)/(max_v-min_v)
 
-def load_json(file_stub):
-    filename = file_stub
-    if not os.path.exists(filename):
-        return None
-    with open(filename) as json_file:
-        return json.load(json_file)
+def scale_dataset(item, minv=1, maxv=7):
+    item['act'] = scale(minv,maxv,-1,1,item['act'])
+    item['val'] = scale(minv,maxv,-1,1,item['val'])
+    return item
 
-def load_pk(file_stub):
-    filename = file_stub
-    if not os.path.exists(filename):
-        return None
-    try:
-        with open(filename, 'rb') as f:
-            # print (f)
-            obj = pickle.load(f)
-            return obj
-    except:
-        return load_pk_old(filename)
-
-def load_pk_old(filename):
-    with open(filename, 'rb') as f:
-        u = pickle._Unpickler(f)
-        u.encoding = 'latin1'
-        p = u.load()
-        return p
+def read_transcript(path):
+    with open(path, 'r') as f:
+        text = f.read()
+    return text

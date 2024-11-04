@@ -11,6 +11,7 @@ class Config:
             if not os.path.exists(config_path):
                 with open(os.path.join(dir_path, 'data_config.yaml'), 'r') as config_file:
                     conf = pyyaml.safe_load(config_file)
+                conf['cache_dataset_path'] = os.path.join(run_location, 'dataset_caches')
                 with open(config_path, 'w') as config_file:
                     config_file.write(pyyaml.dump(conf))
                 raise IOError('Data config file did not exist. Created in current working directory, please confirm config is correct and re-run.')
