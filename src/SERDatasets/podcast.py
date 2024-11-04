@@ -7,7 +7,7 @@ from glob import glob
 from datasets import Dataset, Audio
 from .utils import scale_dataset, read_transcript
 
-def read_podcast(dataset_dir, labels_path, columns, podcast_v=1.11):
+def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
     detailed_lab_file = labels_path.replace('consensus', 'detailed')
     evaluation_line_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,(?P<cat_lbl>\w),(?P<act_lbl>\d+\.\d+),(?P<val_lbl>\d+\.\d+),(?P<dom_lbl>\d+\.\d+),(?P<spkr_id>\d+|Unknown),(?P<gender>Male|Female|Unknown),(?P<split>Train|Validation|Development|Test1|Test2)')
     soft_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,"?(?P<annotator>WORKER\d+);\s(?P<cat_emotion>[A-Za-z() \-|/;.?"!:\[\]&,\s\d_]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]&\s\d],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+);"?')
