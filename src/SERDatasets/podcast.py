@@ -26,7 +26,7 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v=1.11):
                 else:
                     raise IOError(f'Encountered duplicate label {utt_id}')
                 labels[utt_id]['FileName'] = utt_id
-                labels[utt_id]['Audio'] = labels[utt_id]['FileName'].apply(lambda x: os.path.join(dataset_dir, 'Audios', x))
+                labels[utt_id]['Audio'] = os.path.join(dataset_dir, 'Audios', labels[utt_id]['FileName'])
                 labels[utt_id]['act'] = float(utt_results.group('act_lbl')) # Improv stores activation values high to low (1 to 5), not low to high so we need to flip this so that 0 is the lowest and 4 is the highest.
                 labels[utt_id]['val'] = float(utt_results.group('val_lbl'))
                 labels[utt_id]['gender'] = utt_results.group('gender')

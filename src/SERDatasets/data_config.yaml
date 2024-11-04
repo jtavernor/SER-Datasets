@@ -10,7 +10,7 @@ ASR:
 SR: 16000
 iemocap_directory: '/z/public/data/IEMOCAP_full_release'
 improv_directory: '/z/public/data/MSP_IMPROV'
-podcast_directory: '/z/public/data/MSP-Podcast-1.11'
+podcast_directory: '/z/public/data/MSP_Podcast-1.11'
 muse_directory: '/z/public/data/MuSE'
 segmented_iemocap_directory: '/z/tavernor/mmfusion_storage/segmented_wavs'
 segmented_noisy_iemocap_directory: '/z/tavernor/mmfusion_storage/iemocap_noisy_test/wavfile_test_dataset_ALL_segmented'
@@ -22,7 +22,6 @@ podcast_description: 'We are building the largest naturalistic speech emotional 
 muse_description: 'We collect a dataset that we refer to as Multimodal Stressed Emotion (MuSE) to facilitate the learning of the interplay between stress and emotion. There were two sections in each recording: monologues and watching emotionally evocative videos. We measure the stress level at the beginning and end of each recording. The monologue questions and videos were specifically chosen to cover all categories of emotions. At the start of each recording, we also recorded a short one-minute clip without any additional stimuli to register the baseline state of the subject.'
 cache_datasets: True
 cache_dataset_path: 'default' # Default stores alongside config file -- will be set in the config.py method
----
 # Information regarding which values should be returned by the datasets
 return_activation: True
 return_valence: True
