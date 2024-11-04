@@ -55,7 +55,7 @@ def format_datasets(type_to_columns, column_masks, *datasets):
             if len(ds_cols_to_set):
                 dataset.set_format(column_type, columns=ds_cols_to_set, output_all_columns=True, **kwargs)
 
-def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], min_audio_len=3, max_audio_len=15, kde_size=4):
+def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4):
     """
     Creates audio datasets for training, development, and testing from labeled audio files.
 
@@ -174,6 +174,9 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
     }
 
     # If no limit provided then we want to not filter on this so set max/min appropriately
+    min_audio_len = None if conf['min_len'] == -1 else conf['min_len']
+    max_audio_len = None if conf['max_len'] == -1 else conf['max_len']
+
     if max_audio_len is None:
         max_audio_len = lengths['AudioLength'].max()+1 # Don't want to filter any so set it higher than the max 
     if min_audio_len is None:
@@ -285,9 +288,9 @@ class Collator:
         # labels = torch.stack([labels_act, labels_val], dim=1)
         return inputs, transcripts, dataset_ids, labels_act, labels_val
 
-def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], min_audio_len=3, max_audio_len=15, kde_size=4):
+def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4):
     print('Warning -- only use get dataloaders when loading raw audio as it uses a collator assuming padding raw audio')
-    train_datasets, dev_datasets, test_datasets = make_audio_datasets(datasets_to_load, min_audio_len, max_audio_len, kde_size)
+    train_datasets, dev_datasets, test_datasets = make_audio_datasets(datasets_to_load, kde_size)
     processor = Wav2Vec2Processor.from_pretrained('facebook/wav2vec2-base')
     if multidomain_trainining:
         # Train datasets and dev datasets should be merged into one dataset 
