@@ -122,7 +122,7 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
         for key in datasets_to_generate:
             # Calculate audio and text features 
             if feature_generation:
-                processes = 4 if key != 'podcast' else 2 # Podcast sometimes runs out of memory due to size so use less processes
+                processes = 4 if key != 'podcast' else 1 # Podcast sometimes runs out of memory due to size so use less processes
                 train_datasets[key] = train_datasets[key].map(generator, num_proc=processes)
                 dev_datasets[key] = dev_datasets[key].map(generator, num_proc=processes)
                 test_datasets[key] = test_datasets[key].map(generator, num_proc=processes)
