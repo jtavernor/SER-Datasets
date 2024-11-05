@@ -122,9 +122,10 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
         for key in datasets_to_generate:
             # Calculate audio and text features 
             if feature_generation:
-                train_datasets[key] = train_datasets[key].map(generator, num_proc=4)
-                dev_datasets[key] = dev_datasets[key].map(generator, num_proc=4)
-                test_datasets[key] = test_datasets[key].map(generator, num_proc=4)
+                processes = 4 if key != 'podcast' else 2 # Podcast sometimes runs out of memory due to size so use less processes
+                train_datasets[key] = train_datasets[key].map(generator, num_proc=processes)
+                dev_datasets[key] = dev_datasets[key].map(generator, num_proc=processes)
+                test_datasets[key] = test_datasets[key].map(generator, num_proc=processes)
 
             # Set the correct format on the dataset -- has to be done prior to calculation of KDE labels
             format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
