@@ -3,8 +3,9 @@ import re
 import pandas as pd
 import numpy as np
 import pickle
+from tqdm import tqdm
 from glob import glob
-from datasets import Dataset, Audio
+from datasets import Dataset, Audio, concatenate_datasets
 from .utils import scale_dataset, read_transcript
 
 def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
@@ -131,18 +132,59 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
             else:
                 print('No transcript found for', key)
 
-    labels_df = pd.DataFrame(labels.values())
-    labels_df['Dataset'] = 'MSP-Podcast'
-    labels_df = labels_df[columns]
+    # Converting to pandas dataframe takes a long time 
+    # Instead go directly to huggingface
+    # hfdataset = Dataset.from_list(list(labels.values()))
+    # crash
+    # Convert piece by piece 
+    print('Converting to pandas')
+    train_samples = [l for l in labels.values() if l['Split_Set'] == 'Train']
+    dev_samples = [l for l in labels.values() if l['Split_Set'] == 'Development']
+    test_samples = [l for l in labels.values() if l['Split_Set'] == 'Test1']
+    # print(len(train_samples), len(dev_samples), len(test_samples))
+    print('Converting to pandas')
+    temp = pd.DataFrame(test_samples)
+    # print('Converting from pandas')
+    test_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    # print('Converting to pandas')
+    temp = pd.DataFrame(dev_samples)
+    # print('Converting from pandas')
+    dev_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    # print('Converting to pandas')
+    temp = pd.DataFrame(train_samples)
+    # print('Converting from pandas')
+    train_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
 
-    train_df = labels_df[labels_df['Split_Set'] == 'Train']
-    dev_df = labels_df[labels_df['Split_Set'] == 'Development']
-    test_df = labels_df[labels_df['Split_Set'] == 'Test1']
+    # chunk_size = 25000
+    # to_chunk = list(labels.values())
+    # datasets = {'train': [], 'dev': [], 'test': []}
+    # for chunk_idx in tqdm(range(int(np.ceil(len(to_chunk)/chunk_size))), desc='Converting chunks of labels to pandas (infeasibly slow using full podcast)'):
+    #     start = chunk_idx * chunk_size
+    #     end = min((chunk_idx+1)*chunk_size, len(labels))
+    #     labels_df = pd.DataFrame(to_chunk[start:end])
+    #     labels_df['Dataset'] = 'MSP-Podcast'
+    #     labels_df = labels_df[columns]
 
-    train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    train_dataset = train_dataset.map(scale_dataset, num_proc=8)
-    dev_dataset = dev_dataset.map(scale_dataset, num_proc=8)
-    test_dataset = test_dataset.map(scale_dataset, num_proc=8)
+    #     train_df = labels_df[labels_df['Split_Set'] == 'Train']
+    #     dev_df = labels_df[labels_df['Split_Set'] == 'Development']
+    #     test_df = labels_df[labels_df['Split_Set'] == 'Test1']
+
+    #     train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    #     dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    #     test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+
+    #     datasets['train'].append(train_dataset)
+    #     datasets['dev'].append(dev_dataset)
+    #     datasets['test'].append(test_dataset)
+
+    # train_dataset = concatenate_datasets(datasets['train'])
+    # dev_dataset = concatenate_datasets(datasets['dev'])
+    # test_dataset = concatenate_datasets(datasets['test'])
+
+    train_dataset = train_dataset.map(scale_dataset, num_proc=1)
+    dev_dataset = dev_dataset.map(scale_dataset, num_proc=1)
+    test_dataset = test_dataset.map(scale_dataset, num_proc=1)
+
+    # assert len(to_chunk) == len(train_dataset) + len(dev_dataset) + len(test_dataset)
+
     return train_dataset, dev_dataset, test_dataset
