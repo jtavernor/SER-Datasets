@@ -27,7 +27,7 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
                 else:
                     raise IOError(f'Encountered duplicate label {utt_id}')
                 labels[utt_id]['FileName'] = utt_id
-                labels[utt_id]['Audio'] = os.path.join(dataset_dir, 'Audios', labels[utt_id]['FileName'])
+                labels[utt_id]['Audio'] = os.path.join(dataset_dir, 'Audios', f"{labels[utt_id]['FileName']}.wav")
                 labels[utt_id]['act'] = float(utt_results.group('act_lbl')) # Improv stores activation values high to low (1 to 5), not low to high so we need to flip this so that 0 is the lowest and 4 is the highest.
                 labels[utt_id]['val'] = float(utt_results.group('val_lbl'))
                 labels[utt_id]['gender'] = utt_results.group('gender')
@@ -144,14 +144,20 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
     # print(len(train_samples), len(dev_samples), len(test_samples))
     print('Converting to pandas')
     temp = pd.DataFrame(test_samples)
+    temp['Dataset'] = 'MSP-Podcast'
+    temp = temp[columns]
     # print('Converting from pandas')
     test_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     # print('Converting to pandas')
     temp = pd.DataFrame(dev_samples)
+    temp['Dataset'] = 'MSP-Podcast'
+    temp = temp[columns]
     # print('Converting from pandas')
     dev_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     # print('Converting to pandas')
     temp = pd.DataFrame(train_samples)
+    temp['Dataset'] = 'MSP-Podcast'
+    temp = temp[columns]
     # print('Converting from pandas')
     train_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
 
