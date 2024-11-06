@@ -2,6 +2,7 @@ import os
 import torch
 import pandas as pd
 import numpy as np
+import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from transformers import Wav2Vec2Processor
@@ -70,9 +71,10 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
         test_dataset: A huggingface Dataset object containing the testing data.
     """
     # First load config and calculate which columns will be used based on the config file 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     type_to_columns = { # None returns just plain python objects -- use for dictionaries and strings
         None: (np.array(['FileName', 'Split_Set', 'annotators', 'individual_annotators_act', 'individual_annotators_val']), {}),
-        'torch': (np.array(['Audio', 'Text', 'act', 'val', 'soft_act_labels', 'soft_val_labels', 'self-report-act', 'self-report-val']), {'dtype': torch.float32})
+        'torch': (np.array(['Audio', 'Text', 'act', 'val', 'soft_act_labels', 'soft_val_labels', 'self-report-act', 'self-report-val']), {'dtype': torch.float32, 'device': device})
     }
     column_masks = {
         None: [True, True, conf['return_annotator_info'], conf['return_annotator_info'], conf['return_annotator_info']],
