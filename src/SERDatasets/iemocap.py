@@ -128,5 +128,4 @@ def read_iemocap(dataset_dir, labels_path, columns):
     train_dataset = train_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=5), num_proc=8)
     dev_dataset = dev_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=5), num_proc=8)
     test_dataset = test_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=5), num_proc=8)
-    print(train_dataset['act'])
     return train_dataset, dev_dataset, test_dataset
