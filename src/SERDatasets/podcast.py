@@ -23,7 +23,7 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
                     raise IOError(f'Failed to read values from line: {line}')
                 utt_id = utt_results.group('utt_id')
                 if utt_id not in labels:
-                    labels[utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'annotators': [], 'individual_annotators_act': {}, 'individual_annotators_val': {}}
+                    labels[utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'soft_dom_labels': [], 'annotators': []}
                 else:
                     raise IOError(f'Encountered duplicate label {utt_id}')
                 labels[utt_id]['FileName'] = f'{utt_id}.wav'
@@ -62,51 +62,19 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
                 raise IOError(f'Unable to match soft labels in line: {line}')
             labels[m.group('utt_id')]['soft_act_labels'].append(int(float(m.group('act'))))
             labels[m.group('utt_id')]['soft_val_labels'].append(int(float(m.group('val'))))
+            labels[m.group('utt_id')]['soft_dom_labels'].append(int(float(m.group('dom'))))
             annotator = m.group('annotator')
             if annotator in labels[m.group('utt_id')]['annotators']:
-                print('duplicate', annotator, 'in', m.group('utt_id'), 'averaging')
-                utterances_with_duplicates.append((m.group('utt_id'), annotator))
-                if type(labels[m.group('utt_id')]['individual_annotators_act'][annotator]) != list:
-                    labels[m.group('utt_id')]['individual_annotators_act'][annotator] = [labels[m.group('utt_id')]['individual_annotators_act'][annotator]]
-                    labels[m.group('utt_id')]['individual_annotators_val'][annotator] = [labels[m.group('utt_id')]['individual_annotators_val'][annotator]]
+                print('Note: duplicate', annotator, 'in', m.group('utt_id'), 'NOT averaging, includes duplicates in output')
+                # utterances_with_duplicates.append((m.group('utt_id'), annotator))
+                # if type(labels[m.group('utt_id')]['individual_annotators_act'][annotator]) != list:
+                #     labels[m.group('utt_id')]['individual_annotators_act'][annotator] = [labels[m.group('utt_id')]['individual_annotators_act'][annotator]]
+                #     labels[m.group('utt_id')]['individual_annotators_val'][annotator] = [labels[m.group('utt_id')]['individual_annotators_val'][annotator]]
 
-                labels[m.group('utt_id')]['individual_annotators_act'][annotator].append(int(float(m.group('act'))))
-                labels[m.group('utt_id')]['individual_annotators_val'][annotator].append(int(float(m.group('val'))))
-                continue
+                # labels[m.group('utt_id')]['individual_annotators_act'][annotator].append(int(float(m.group('act'))))
+                # labels[m.group('utt_id')]['individual_annotators_val'][annotator].append(int(float(m.group('val'))))
+                # continue
             labels[m.group('utt_id')]['annotators'].append(annotator)
-            labels[m.group('utt_id')]['individual_annotators_act'][annotator] = int(float(m.group('act')))
-            labels[m.group('utt_id')]['individual_annotators_val'][annotator] = int(float(m.group('val')))
-            # labels[m.group('utt_id')]['soft_dom_label'].append(float(m.group('dom')))
-            if annotator not in individual_annotators:
-                individual_annotators[annotator] = {}
-            individual_annotators[annotator][m.group('utt_id')] = {'act': int(float(m.group('act'))), 'val': int(float(m.group('val')))}
-
-    for utt_id, annotator in set(utterances_with_duplicates):
-        # print(utt_id, annotator)
-        sub_act = labels[utt_id]['individual_annotators_act'][annotator]
-        sub_val = labels[utt_id]['individual_annotators_val'][annotator]
-        # print(sub_act, sub_val)
-        annotator_act = np.mean(sub_act).item()
-        annotator_val = np.mean(sub_val).item()
-        curr_len = len(labels[utt_id]['soft_act_labels'])
-        # print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
-        for act in sub_act:
-            labels[utt_id]['soft_act_labels'].remove(act)
-            curr_len -= 1
-            assert len(labels[utt_id]['soft_act_labels']) == curr_len
-        curr_len = len(labels[utt_id]['soft_val_labels'])
-        for val in sub_val:
-            labels[utt_id]['soft_val_labels'].remove(val)
-            curr_len -= 1
-            assert len(labels[utt_id]['soft_val_labels']) == curr_len
-        labels[utt_id]['soft_act_labels'].append(annotator_act)
-        labels[utt_id]['soft_val_labels'].append(annotator_val)
-        # print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
-        labels[utt_id]['individual_annotators_act'][annotator] = annotator_act
-        labels[utt_id]['individual_annotators_val'][annotator] = annotator_val
-        labels[utt_id]['act'] = np.mean(labels[utt_id]['soft_act_labels']).item()
-        labels[utt_id]['val'] = np.mean(labels[utt_id]['soft_val_labels']).item()
-        individual_annotators[annotator][utt_id] = {'act': annotator_act, 'val': annotator_val}
 
     # Now load transcripts for each label 
     transcripts = {}
@@ -132,64 +100,47 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
             else:
                 print('No transcript found for', key)
 
-    # Converting to pandas dataframe takes a long time 
-    # Instead go directly to huggingface
-    # hfdataset = Dataset.from_list(list(labels.values()))
-    # crash
-    # Convert piece by piece 
-    print('Converting to pandas')
-    train_samples = [l for l in labels.values() if l['Split_Set'] == 'Train']
-    dev_samples = [l for l in labels.values() if l['Split_Set'] == 'Development']
-    test_samples = [l for l in labels.values() if l['Split_Set'] == 'Test1']
-    # print(len(train_samples), len(dev_samples), len(test_samples))
-    print('Converting to pandas')
-    temp = pd.DataFrame(test_samples)
-    temp['Dataset'] = 'MSP-Podcast'
-    temp = temp[columns]
-    # print('Converting from pandas')
-    test_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    # print('Converting to pandas')
-    temp = pd.DataFrame(dev_samples)
-    temp['Dataset'] = 'MSP-Podcast'
-    temp = temp[columns]
-    # print('Converting from pandas')
-    dev_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    # print('Converting to pandas')
-    temp = pd.DataFrame(train_samples)
-    temp['Dataset'] = 'MSP-Podcast'
-    temp = temp[columns]
-    # print('Converting from pandas')
-    train_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    labels_df = pd.DataFrame(labels.values())
+    labels_df['Dataset'] = 'MSP-Podcast'
+    labels_df = labels_df[columns]
 
-    # chunk_size = 25000
-    # to_chunk = list(labels.values())
-    # datasets = {'train': [], 'dev': [], 'test': []}
-    # for chunk_idx in tqdm(range(int(np.ceil(len(to_chunk)/chunk_size))), desc='Converting chunks of labels to pandas (infeasibly slow using full podcast)'):
-    #     start = chunk_idx * chunk_size
-    #     end = min((chunk_idx+1)*chunk_size, len(labels))
-    #     labels_df = pd.DataFrame(to_chunk[start:end])
-    #     labels_df['Dataset'] = 'MSP-Podcast'
-    #     labels_df = labels_df[columns]
+    train_df = labels_df[labels_df['Split_Set'] == 'Train']
+    dev_df = labels_df[labels_df['Split_Set'] == 'Development']
+    test_df = labels_df[labels_df['Split_Set'] == 'Test1']
 
-    #     train_df = labels_df[labels_df['Split_Set'] == 'Train']
-    #     dev_df = labels_df[labels_df['Split_Set'] == 'Development']
-    #     test_df = labels_df[labels_df['Split_Set'] == 'Test1']
+    train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    # # Converting to pandas dataframe takes a long time 
+    # # Instead go directly to huggingface
+    # # hfdataset = Dataset.from_list(list(labels.values()))
+    # # crash
+    # # Convert piece by piece 
+    # train_samples = [l for l in labels.values() if l['Split_Set'] == 'Train']
+    # dev_samples = [l for l in labels.values() if l['Split_Set'] == 'Development']
+    # test_samples = [l for l in labels.values() if l['Split_Set'] == 'Test1']
+    # # print(len(train_samples), len(dev_samples), len(test_samples))
+    # temp = pd.DataFrame(test_samples)
+    # temp['Dataset'] = 'MSP-Podcast'
+    # temp = temp[columns]
+    # # print('Converting from pandas')
+    # test_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    # # print('Converting to pandas')
+    # temp = pd.DataFrame(dev_samples)
+    # temp['Dataset'] = 'MSP-Podcast'
+    # temp = temp[columns]
+    # # print('Converting from pandas')
+    # dev_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+    # # print('Converting to pandas')
+    # temp = pd.DataFrame(train_samples)
+    # temp['Dataset'] = 'MSP-Podcast'
+    # temp = temp[columns]
+    # # print('Converting from pandas')
+    # train_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
 
-    #     train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    #     dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    #     test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-
-    #     datasets['train'].append(train_dataset)
-    #     datasets['dev'].append(dev_dataset)
-    #     datasets['test'].append(test_dataset)
-
-    # train_dataset = concatenate_datasets(datasets['train'])
-    # dev_dataset = concatenate_datasets(datasets['dev'])
-    # test_dataset = concatenate_datasets(datasets['test'])
-
-    train_dataset = train_dataset.map(scale_dataset, num_proc=1)
-    dev_dataset = dev_dataset.map(scale_dataset, num_proc=1)
-    test_dataset = test_dataset.map(scale_dataset, num_proc=1)
+    train_dataset = train_dataset.map(scale_dataset, num_proc=8)
+    dev_dataset = dev_dataset.map(scale_dataset, num_proc=8)
+    test_dataset = test_dataset.map(scale_dataset, num_proc=8)
 
     # assert len(to_chunk) == len(train_dataset) + len(dev_dataset) + len(test_dataset)
 

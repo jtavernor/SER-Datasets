@@ -16,9 +16,7 @@ def read_improv(dataset_dir, labels_path, columns):
     utterance_matcher = re.compile(r'MSP-IMPROV-S(?P<sentence>\d\d)(?P<intended_emotion>[AHSN])-(?P<speaker>(?P<gender>[MF])\d\d)-(?P<scenario>[PRST])-(?P<listener>[FM])(?P<dyadic_speaker>[FM])(?P<turn_number>\d\d)')
     soft_matcher = re.compile(r'(?P<annotator>[A-Za-z\-0-9_]+);\s(?P<cat_emotion>[A-Za-z]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+|NaN);\sN:(?P<naturalness>[0-9.]+|NaN);')
     labels = {}
-    individual_annotators = {}
 
-    utterances_with_duplicates = []
     with open(labels_path, 'r') as r:
         current_utt = None
         for line in r.readlines():
@@ -31,7 +29,7 @@ def read_improv(dataset_dir, labels_path, columns):
                 full_utt_id = f'MSP-IMPROV-{utt_id}'
                 current_utt = full_utt_id
                 if full_utt_id not in labels:
-                    labels[full_utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'annotators': [], 'individual_annotators_act': {}, 'individual_annotators_val': {}, 'naturalness': []}
+                    labels[full_utt_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'soft_dom_labels': [], 'soft_naturalness_labels': [], 'annotators': [], 'naturalness': []}
                 else:
                     raise IOError(f'Encountered duplicate label {full_utt_id}')
                 labels[full_utt_id]['act'] = 6.0 - float(utt_results.group('act_lbl')) # Improv stores activation values high to low (1 to 5), not low to high so we need to flip this so that 0 is the lowest and 4 is the highest.
@@ -65,56 +63,21 @@ def read_improv(dataset_dir, labels_path, columns):
                 if matches is None:
                     print(utt_id, line)
                 annotator = matches.group('annotator')
-                if annotator not in individual_annotators:
-                    individual_annotators[annotator] = {}
                 annotator_act = int(6.0 - float(matches.group('act')))
                 annotator_val = int(float(matches.group('val')))
+                annotator_dom = int(float(matches.group('dom')))
+                annotator_naturalness = int(float(matches.group('naturalness')))
                 labels[current_utt]['soft_act_labels'].append(annotator_act)
                 labels[current_utt]['soft_val_labels'].append(annotator_val)
+                labels[current_utt]['soft_dom_labels'].append(annotator_dom)
+                labels[current_utt]['soft_naturalness_labels'].append(annotator_naturalness)
                 if annotator in labels[current_utt]['annotators']:
-                    print('duplicate', annotator, 'in', current_utt, 'averaging')
-                    utterances_with_duplicates.append((current_utt, annotator))
-                    labels[current_utt]['individual_annotators_act'][annotator] = [labels[current_utt]['individual_annotators_act'][annotator]] + [annotator_act]
-                    labels[current_utt]['individual_annotators_val'][annotator] = [labels[current_utt]['individual_annotators_val'][annotator]] + [annotator_val]
-                    continue
+                    print('Note: duplicate', annotator, 'in', current_utt, 'NOT averaging, including duplicates in output')
+                    # utterances_with_duplicates.append((current_utt, annotator))
+                    # labels[current_utt]['individual_annotators_act'][annotator] = [labels[current_utt]['individual_annotators_act'][annotator]] + [annotator_act]
+                    # labels[current_utt]['individual_annotators_val'][annotator] = [labels[current_utt]['individual_annotators_val'][annotator]] + [annotator_val]
+                    # continue
                 labels[current_utt]['annotators'].append(annotator)
-                labels[current_utt]['individual_annotators_act'][annotator] = annotator_act
-                labels[current_utt]['individual_annotators_val'][annotator] = annotator_val
-                labels[current_utt]['naturalness'].append(matches.group('naturalness'))
-                individual_annotators[annotator][current_utt] = {'act': annotator_act, 'val': annotator_val}
-
-    for utt_id, annotator in set(utterances_with_duplicates):
-        print(utt_id, annotator)
-        sub_act = labels[utt_id]['individual_annotators_act'][annotator]
-        sub_val = labels[utt_id]['individual_annotators_val'][annotator]
-        print(sub_act, sub_val)
-        annotator_act = np.mean(sub_act).item()
-        annotator_val = np.mean(sub_val).item()
-        curr_len = len(labels[utt_id]['soft_act_labels'])
-        print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
-        for act in sub_act:
-            labels[utt_id]['soft_act_labels'].remove(act)
-            curr_len -= 1
-            assert len(labels[utt_id]['soft_act_labels']) == curr_len
-        curr_len = len(labels[utt_id]['soft_val_labels'])
-        for val in sub_val:
-            labels[utt_id]['soft_val_labels'].remove(val)
-            curr_len -= 1
-            assert len(labels[utt_id]['soft_val_labels']) == curr_len
-        labels[utt_id]['soft_act_labels'].append(annotator_act)
-        labels[utt_id]['soft_val_labels'].append(annotator_val)
-        print(labels[utt_id]['soft_act_labels'], labels[utt_id]['soft_val_labels'])
-        labels[utt_id]['individual_annotators_act'][annotator] = annotator_act
-        labels[utt_id]['individual_annotators_val'][annotator] = annotator_val
-        labels[utt_id]['act'] = np.mean(labels[utt_id]['soft_act_labels']).item()
-        labels[utt_id]['val'] = np.mean(labels[utt_id]['soft_val_labels']).item()
-        individual_annotators[annotator][utt_id] = {'act': annotator_act, 'val': annotator_val}
-
-    too_few_evaluations = []
-    for annotator in individual_annotators:
-        num_evals = len(individual_annotators[annotator].keys())
-        if num_evals < 0:
-            too_few_evaluations.append(annotator)
 
     # Now load transcripts for each label 
     for key in list(labels.keys()):
@@ -125,7 +88,6 @@ def read_improv(dataset_dir, labels_path, columns):
             continue
         with open(transcript_file, 'r') as f:
             labels[key]['Text'] = f.read()
-
 
     labels_df = pd.DataFrame(labels.values())
     labels_df = labels_df[columns]

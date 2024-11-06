@@ -60,6 +60,10 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
     """
     Creates audio datasets for training, development, and testing from labeled audio files.
 
+    Code requires setting multiprocessing method to spawn prior to call to create features correctly
+    from multiprocess import set_start_method
+    set_start_method('spawn')
+    
     Args:
         audio_dir (str): The directory containing the audio files.
         labels_path (str): The path to the CSV file containing the labels and file information.
@@ -73,11 +77,11 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
     # First load config and calculate which columns will be used based on the config file 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     type_to_columns = { # None returns just plain python objects -- use for dictionaries and strings
-        None: (np.array(['FileName', 'Split_Set', 'annotators', 'individual_annotators_act', 'individual_annotators_val']), {}),
+        None: (np.array(['FileName', 'Split_Set', 'annotators']), {}),
         'torch': (np.array(['Audio', 'Text', 'act', 'val', 'soft_act_labels', 'soft_val_labels', 'self-report-act', 'self-report-val']), {'dtype': torch.float32, 'device': device})
     }
     column_masks = {
-        None: [True, True, conf['return_annotator_info'], conf['return_annotator_info'], conf['return_annotator_info']],
+        None: [True, True, conf['return_annotator_info']],
         'torch': [True, True, conf['return_activation'], conf['return_valence'], conf['return_activation'] and conf['return_soft_labels'], conf['return_valence'] and conf['return_soft_labels'], conf['return_activation'] and conf['return_self_report'], conf['return_valence'] and conf['return_self_report']]
     }
     # Apply masks along configs to keep only columns where mask is True
@@ -124,7 +128,7 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
         for key in datasets_to_generate:
             # Calculate audio and text features 
             if feature_generation:
-                processes = 4 if key != 'podcast' else 1 # Podcast sometimes runs out of memory due to size so use less processes
+                processes = 4 #if key != 'podcast' else 1 # Podcast sometimes runs out of memory due to size so use less processes
                 train_datasets[key] = train_datasets[key].map(generator, num_proc=processes)
                 dev_datasets[key] = dev_datasets[key].map(generator, num_proc=processes)
                 test_datasets[key] = test_datasets[key].map(generator, num_proc=processes)

@@ -28,7 +28,7 @@ def read_iemocap(dataset_dir, labels_path, columns):
     for label_id in label_info:
         if label_id in labels:
             raise IOError(f'Multiple labels for the same speech {label_id}')
-        labels[label_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'soft_dom_labels': [], 'individual_annotators_act': {}, 'individual_annotators_val': {}, 'individual_annotators_dom': {}, 'annotators': []}
+        labels[label_id] = {'soft_act_labels': [], 'soft_val_labels': [], 'soft_dom_labels': [], 'self-report-annotators': [], 'annotators': []}
         for line in label_info[label_id]:
             # First line contains averaged labels
             if line.startswith('[') and line.endswith(']'):
@@ -51,12 +51,9 @@ def read_iemocap(dataset_dir, labels_path, columns):
                     labels[label_id]['soft_act_labels'].append(int(regex_match.group('act')))
                     labels[label_id]['soft_dom_labels'].append(int(regex_match.group('dom')))
                     annotator = regex_match.group('annotator')
-                    if annotator not in individual_annotators:
-                        individual_annotators[annotator] = {}
-                    individual_annotators[annotator][label_id] = {'act': int(regex_match.group('act')), 'val': int(regex_match.group('val')), 'dom': int(regex_match.group('dom'))}
-                    labels[label_id]['individual_annotators_act'][annotator] = int(regex_match.group('act'))
-                    labels[label_id]['individual_annotators_val'][annotator] = int(regex_match.group('val'))
-                    labels[label_id]['individual_annotators_dom'][annotator] = int(regex_match.group('dom'))
+                    # Warning: Individual annotator votes can be reconstructed as the soft label variables above will align with annotators list, so we can pair up readings
+                    # the individual annotators stored in huggingface format becomes an insanely large dictionary and takes over a minute per batch to read from disk 
+                    # probably best to delete these when loading the dataset and recalculate it at a later date
                     labels[label_id]['annotators'].append(annotator)
                 else:
                     # Bad label that is not in the range 1-5 or is just blank 
@@ -73,13 +70,7 @@ def read_iemocap(dataset_dir, labels_path, columns):
                     labels[label_id]['self-report-act'] = float(regex_match.group('act'))
                     labels[label_id]['self-report-dom'] = float(regex_match.group('dom'))
                     annotator = regex_match.group('annotator')
-                    if annotator not in individual_annotators:
-                        individual_annotators[annotator] = {}
-                    individual_annotators[annotator][label_id] = {'act': int(regex_match.group('act')), 'val': int(regex_match.group('val')), 'dom': int(regex_match.group('dom'))}
-                    labels[label_id]['individual_annotators_act'][annotator] = int(regex_match.group('act'))
-                    labels[label_id]['individual_annotators_val'][annotator] = int(regex_match.group('val'))
-                    labels[label_id]['individual_annotators_dom'][annotator] = int(regex_match.group('dom'))
-                    labels[label_id]['annotators'].append(annotator)
+                    labels[label_id]['self-report-annotators'].append(annotator)
                 else:
                     # Bad label that is not in the range 1-5 or is just blank 
                     print(f'Bad label {label_id}: {line}')
@@ -121,7 +112,7 @@ def read_iemocap(dataset_dir, labels_path, columns):
         labels_dict.append({
             'Audio': audio_path, 'Split_Set': split, 'FileName': filename, 'Dataset': 'IEMOCAP',
             **labels[label_id]
-            })
+        })
 
     labels_df = pd.DataFrame(labels_dict)
     # labels_df['Audio'] = labels_df['FileName'].apply(lambda x: os.path.join(audio_dir, x))
