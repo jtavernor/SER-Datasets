@@ -65,7 +65,7 @@ def read_improv(dataset_dir, labels_path, columns):
                 annotator = matches.group('annotator')
                 annotator_act = int(6.0 - float(matches.group('act')))
                 annotator_val = int(float(matches.group('val')))
-                annotator_dom = int(float(matches.group('dom')))
+                annotator_dom = float(matches.group('dom')) # Use float here because annotator_dom is sometimes NaN
                 annotator_naturalness = int(float(matches.group('naturalness')))
                 labels[current_utt]['soft_act_labels'].append(annotator_act)
                 labels[current_utt]['soft_val_labels'].append(annotator_val)
