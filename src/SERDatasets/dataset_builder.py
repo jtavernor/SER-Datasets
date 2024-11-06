@@ -183,13 +183,20 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
     if min_audio_len is None:
         min_audio_len = lengths['AudioLength'].min()-1 # Don't want to filter any so set it lower than the min
 
-    # Now filter dataset and create new 
+    # Now filter dataset and create new
+    def filter_len(x):
+        lengths = dataset_lengths.loc[x['FileName']]['AudioLength']
+        not_too_short = min_audio_len <= lengths
+        not_too_long = lengths <= max_audio_len
+        audio_exists = lengths > 0 
+        return np.logical_and(np.logical_and(not_too_long, not_too_short), audio_exists)
+
     for key in datasets_to_load:
         dataset_lengths = lengths_by_dataset[key]
         # Remove samples not in the min/max audio length
-        train_datasets[key] = train_datasets[key].filter(lambda x: min_audio_len <= dataset_lengths.loc[x['FileName']]['AudioLength'].item() <= max_audio_len and dataset_lengths.loc[x['FileName']]['AudioLength'].item() > 0, num_proc=8)
-        dev_datasets[key] = dev_datasets[key].filter(lambda x: min_audio_len <= dataset_lengths.loc[x['FileName']]['AudioLength'].item() <= max_audio_len and dataset_lengths.loc[x['FileName']]['AudioLength'].item() > 0, num_proc=8)
-        test_datasets[key] = test_datasets[key].filter(lambda x: min_audio_len <= dataset_lengths.loc[x['FileName']]['AudioLength'].item() <= max_audio_len and dataset_lengths.loc[x['FileName']]['AudioLength'].item() > 0, num_proc=8)
+        train_datasets[key] = train_datasets[key].filter(filter_len, batched=True)
+        dev_datasets[key] = dev_datasets[key].filter(filter_len, batched=True)
+        test_datasets[key] = test_datasets[key].filter(filter_len, batched=True)
 
     # Now make sure dataset is in the correct format 
     format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])

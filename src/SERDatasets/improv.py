@@ -55,7 +55,7 @@ def read_improv(dataset_dir, labels_path, columns):
                 else:
                     raise ValueError(f'Unknown split for {full_utt_id}')
                 labels[full_utt_id]['Split_Set'] = split
-                labels[full_utt_id]['FileName'] = full_utt_id
+                labels[full_utt_id]['FileName'] = f'{full_utt_id}.wav'
                 labels[full_utt_id]['Dataset'] = 'MSP-Improv'
             elif line == '':
                 current_utt = None
