@@ -6,14 +6,12 @@ import pickle
 from tqdm import tqdm
 from glob import glob
 from datasets import Dataset, Audio, concatenate_datasets
-from .utils import scale_dataset, read_transcript
 
 def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
     detailed_lab_file = labels_path.replace('consensus', 'detailed')
     evaluation_line_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,(?P<cat_lbl>\w),(?P<act_lbl>\d+\.\d+),(?P<val_lbl>\d+\.\d+),(?P<dom_lbl>\d+\.\d+),(?P<spkr_id>\d+|Unknown),(?P<gender>Male|Female|Unknown),(?P<split>Train|Validation|Development|Test1|Test2)')
     soft_matcher = re.compile(r'(?P<utt_id>MSP-PODCAST_[0-9_]*).wav,"?(?P<annotator>WORKER\d+);\s(?P<cat_emotion>[A-Za-z() \-|/;.?"!:\[\]&,\s\d_]+);\s(?P<soft_emotions>([A-Za-z() \-|/;.?"!:\[\]&\s\d],?)+|);\sA:(?P<act>[0-9.]+);\sV:(?P<val>[0-9.]+);\sD:(?P<dom>[0-9.]+);"?')
     labels = {}
-    individual_annotators = {}
     with open(labels_path, 'r') as r:
         for line in r.readlines():
             line=line.rstrip()
@@ -111,37 +109,5 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
     train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    # # Converting to pandas dataframe takes a long time 
-    # # Instead go directly to huggingface
-    # # hfdataset = Dataset.from_list(list(labels.values()))
-    # # crash
-    # # Convert piece by piece 
-    # train_samples = [l for l in labels.values() if l['Split_Set'] == 'Train']
-    # dev_samples = [l for l in labels.values() if l['Split_Set'] == 'Development']
-    # test_samples = [l for l in labels.values() if l['Split_Set'] == 'Test1']
-    # # print(len(train_samples), len(dev_samples), len(test_samples))
-    # temp = pd.DataFrame(test_samples)
-    # temp['Dataset'] = 'MSP-Podcast'
-    # temp = temp[columns]
-    # # print('Converting from pandas')
-    # test_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    # # print('Converting to pandas')
-    # temp = pd.DataFrame(dev_samples)
-    # temp['Dataset'] = 'MSP-Podcast'
-    # temp = temp[columns]
-    # # print('Converting from pandas')
-    # dev_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    # # print('Converting to pandas')
-    # temp = pd.DataFrame(train_samples)
-    # temp['Dataset'] = 'MSP-Podcast'
-    # temp = temp[columns]
-    # # print('Converting from pandas')
-    # train_dataset = Dataset.from_pandas(temp).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-
-    train_dataset = train_dataset.map(scale_dataset, num_proc=8)
-    dev_dataset = dev_dataset.map(scale_dataset, num_proc=8)
-    test_dataset = test_dataset.map(scale_dataset, num_proc=8)
-
-    # assert len(to_chunk) == len(train_dataset) + len(dev_dataset) + len(test_dataset)
 
     return train_dataset, dev_dataset, test_dataset

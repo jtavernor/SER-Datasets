@@ -2,7 +2,6 @@ import os
 import re
 import pandas as pd
 from datasets import Dataset, Audio
-from .utils import scale_dataset, read_transcript
 
 def map_to_split(utterance_id):
     speaker = utterance_id[:2]
@@ -41,6 +40,11 @@ def map_to_transcript(row):
         raise ValueError('Unknown stress type', stress_type, 'for file:', row['FileName'])
     return os.path.join(stress_path, row['FileName'].replace('.wav', '.txt'))
 
+def read_transcript(path):
+    with open(path, 'r') as f:
+        text = f.read()
+    return text
+
 def read_muse(dataset_dir, labels_path, columns):
     labels_df = pd.read_csv(labels_path)
     labels_df = labels_df.rename(columns={'Sentence_name': 'FileName', 'Activation_Mean': 'act', 'Valence_Mean': 'val',
@@ -65,15 +69,5 @@ def read_muse(dataset_dir, labels_path, columns):
     train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    # print(min(train_dataset['EmoAct']), max(train_dataset['EmoAct']))
-    # print(min(train_dataset['EmoVal']), max(train_dataset['EmoVal']))
-    
-    # print(min(dev_dataset['EmoAct']), max(dev_dataset['EmoAct']))
-    # print(min(dev_dataset['EmoVal']), max(dev_dataset['EmoVal']))
-    
-    # print(min(test_dataset['EmoAct']), max(test_dataset['EmoAct']))
-    # print(min(test_dataset['EmoVal']), max(test_dataset['EmoVal']))
-    train_dataset = train_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=9), num_proc=8)
-    dev_dataset = dev_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=9), num_proc=8)
-    test_dataset = test_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=9), num_proc=8)
+
     return train_dataset, dev_dataset, test_dataset

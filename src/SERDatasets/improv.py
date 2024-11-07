@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 from glob import glob
 from datasets import Dataset, Audio
-from .utils import scale_dataset, read_transcript
 
 def read_improv(dataset_dir, labels_path, columns):
     all_wavs = glob(os.path.join(dataset_dir, 'Audio/**/**/**/*.wav'))
@@ -99,7 +98,5 @@ def read_improv(dataset_dir, labels_path, columns):
     train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
     test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    train_dataset = train_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=5), num_proc=8)
-    dev_dataset = dev_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=5), num_proc=8)
-    test_dataset = test_dataset.map(lambda x: scale_dataset(x, minv=1, maxv=5), num_proc=8)
+
     return train_dataset, dev_dataset, test_dataset

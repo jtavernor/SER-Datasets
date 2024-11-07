@@ -14,6 +14,7 @@ from .iemocap import read_iemocap
 from .muse import read_muse
 from .config import Config
 from .kde_probability import kde_probability_bs
+from .utils import scale_dataset
 
 conf = Config()
 
@@ -30,6 +31,14 @@ label_paths = {
     'muse': os.path.join(conf['muse_directory'], 'SurveyInformation', 'Emotion data from crowdsourcing (C is when annotators had access to all previous sentences).csv'),
     'iemocap': os.path.join(conf['iemocap_directory'], 'IEMOCAP_EmoEvaluation.txt'),
 }
+# Define the min and maximum values in the data prior to scaling
+dataset_scale_parameters = {
+    'podcast': (1, 7),
+    'improv': (1, 5),
+    'iemocap': (1, 5),
+    'muse': (1, 9),
+}
+
 # MuSE not named consistently so check if path correct
 if not os.path.exists(label_paths['muse']):
     label_paths['muse'] = os.path.join(conf['muse_directory'], 'Survey Information (Questions, Data etc)', 'Emotion data from crowdsourcing (C is when annotators had access to all previous sentences).csv')
@@ -47,14 +56,16 @@ def add_length(sample):
     return sample
 
 def format_datasets(type_to_columns, column_masks, *datasets):
-    for column_type in type_to_columns:
-        columns_to_set, kwargs = type_to_columns[column_type]
-        columns_to_set = columns_to_set[column_masks[column_type]]
-        for dataset in datasets:
-            # Dataset may not have all available columns -- remove them at this point
-            ds_cols_to_set = [col for col in columns_to_set if col in dataset.features.keys()]
-            if len(ds_cols_to_set):
-                dataset.set_format(column_type, columns=ds_cols_to_set, output_all_columns=True, **kwargs)
+    # Only the torch type needs to be formatted, the None types are still left as none
+    # only one formatting can be applied so it has to be left implicit for the None types
+    column_type = 'torch'
+    columns_to_set, kwargs = type_to_columns[column_type]
+    columns_to_set = columns_to_set[column_masks[column_type]]
+    for dataset in datasets:
+        # Dataset may not have all available columns -- remove them at this point
+        ds_cols_to_set = [col for col in columns_to_set if col in dataset.features.keys()]
+        if len(ds_cols_to_set):
+            dataset.set_format(column_type, columns=ds_cols_to_set, output_all_columns=True, **kwargs)
 
 def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4):
     """
@@ -117,6 +128,10 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
         for key in datasets_to_generate:
             # Load labels for each dataset
             train_datasets[key], dev_datasets[key], test_datasets[key] = file_reader[key](dataset_paths[key], label_paths[key], columns=columns)
+            min_v, max_v = dataset_scale_parameters[key]
+            train_datasets[key] = train_datasets[key].map(lambda x: scale_dataset(x, min_v, max_v), num_proc=8)
+            dev_datasets[key] = dev_datasets[key].map(lambda x: scale_dataset(x, min_v, max_v), num_proc=8)
+            test_datasets[key] = test_datasets[key].map(lambda x: scale_dataset(x, min_v, max_v), num_proc=8)
 
         # Check that features need to be generated for audio and text 
         audio_features, text_features = conf['audio_feature_type'], conf['text_feature_type']
@@ -204,8 +219,8 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
         dev_datasets[key] = dev_datasets[key].filter(filter_len, batched=True)
         test_datasets[key] = test_datasets[key].filter(filter_len, batched=True)
 
-    # Now make sure dataset is in the correct format 
-    format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
+        # Now make sure dataset is in the correct format 
+        format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
 
     return train_datasets, dev_datasets, test_datasets
 
