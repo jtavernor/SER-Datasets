@@ -67,7 +67,7 @@ def format_datasets(type_to_columns, column_masks, *datasets):
         if len(ds_cols_to_set):
             dataset.set_format(column_type, columns=ds_cols_to_set, output_all_columns=True, **kwargs)
 
-def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4):
+def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'], kde_size=4):
     """
     Creates audio datasets for training, development, and testing from labeled audio files.
 
@@ -153,9 +153,9 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
 
             # Calculate KDE 2D labels
             if conf['calculate_kde']:
-                train_datasets[key] = train_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size), batched=True, batch_size=256)
-                dev_datasets[key] = dev_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size), batched=True, batch_size=256)
-                test_datasets[key] = test_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size), batched=True, batch_size=256)
+                train_datasets[key] = train_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
+                dev_datasets[key] = dev_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
+                test_datasets[key] = test_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
             
             for types, typeg in [('train', train_datasets), ('val', dev_datasets), ('test', test_datasets)]:
                 print(key, types, 'Activation min and max:', min(typeg[key]['act']), max(typeg[key]['act']))
@@ -224,19 +224,23 @@ def make_audio_datasets(datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'
 
     return train_datasets, dev_datasets, test_datasets
 
-def create_kde_labels_map(batched_examples, kde_size):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    soft_act = torch.nn.utils.rnn.pad_sequence(batched_examples['soft_act_labels'], batch_first=True, padding_value=torch.nan).to(device, non_blocking=True)
-    soft_val = torch.nn.utils.rnn.pad_sequence(batched_examples['soft_val_labels'], batch_first=True, padding_value=torch.nan).to(device, non_blocking=True)
-    batch_size = soft_act.shape[0]
-    kde_2d_prob = kde_probability_bs(soft_act, soft_val, use_soft_histogram=False, prob_grid_size=kde_size, temperature=512, density_grid_size=512, precision=torch.float64)
-    negs = kde_2d_prob < 0
-    if negs.any():
-        raise ValueError(f'Negative values in KDE probability. Largest negative:-{kde_2d_prob[negs].abs().max()}')
-    kde_2d_prob = kde_2d_prob.view(batch_size,-1)# - kde_2d_prob.view(curr_bs,-1).min(dim=-1).values.unsqueeze(dim=-1)
-    kde_2d_prob = kde_2d_prob / kde_2d_prob.sum(dim=-1).unsqueeze(dim=-1)
-    kde_2d_prob = kde_2d_prob.view(batch_size,kde_size,kde_size).float()
-    batched_examples['kde_2d_probability'] = kde_2d_prob.cpu()
+def create_kde_labels_map(batched_examples, kde_size, num_calculations=1):
+    for gen in range(num_calculations):
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        soft_act = torch.nn.utils.rnn.pad_sequence(batched_examples['soft_act_labels'], batch_first=True, padding_value=torch.nan).to(device, non_blocking=True)
+        soft_val = torch.nn.utils.rnn.pad_sequence(batched_examples['soft_val_labels'], batch_first=True, padding_value=torch.nan).to(device, non_blocking=True)
+        batch_size = soft_act.shape[0]
+        kde_2d_prob = kde_probability_bs(soft_act, soft_val, use_soft_histogram=False, prob_grid_size=kde_size, temperature=512, density_grid_size=512, precision=torch.float64)
+        negs = kde_2d_prob < 0
+        if negs.any():
+            raise ValueError(f'Negative values in KDE probability. Largest negative:-{kde_2d_prob[negs].abs().max()}')
+        kde_2d_prob = kde_2d_prob.view(batch_size,-1)# - kde_2d_prob.view(curr_bs,-1).min(dim=-1).values.unsqueeze(dim=-1)
+        kde_2d_prob = kde_2d_prob / kde_2d_prob.sum(dim=-1).unsqueeze(dim=-1)
+        kde_2d_prob = kde_2d_prob.view(batch_size,kde_size,kde_size).float()
+        batched_examples[f'kde_2d_probability_generation_{gen}'] = kde_2d_prob.cpu()
+    if num_calculations == 1:
+        batched_examples['kde_2d_probability'] = batched_examples['kde_2d_probability_generation_0']
+        del batched_examples['kde_2d_probability_generation_0']
     return batched_examples
 
 class FeatureGenerator:
