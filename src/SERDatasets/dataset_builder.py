@@ -137,7 +137,7 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
         audio_features, text_features = conf['audio_feature_type'], conf['text_feature_type']
         feature_generation = audio_features != 'raw' or text_features != 'raw'
         if feature_generation: # Create an object that can be called for creating features
-            generator = FeatureGenerator(audio_features, text_features)
+            generator = FeatureGenerator(audio_features, text_features, audio_feature_layer=conf['audio_feature_layer'])
 
         # Now create features 
         for key in datasets_to_generate:
@@ -244,9 +244,10 @@ def create_kde_labels_map(batched_examples, kde_size, num_calculations=1):
     return batched_examples
 
 class FeatureGenerator:
-    def __init__(self, audio_features, text_features):
+    def __init__(self, audio_features, text_features, audio_feature_layer):
         self.audio_features = audio_features
         self.text_features = text_features
+        self.audio_feature_layer = audio_feature_layer
         self.initialised = False
 
     def __call__(self, sample):
@@ -275,7 +276,10 @@ class FeatureGenerator:
                 if torch.cuda.is_available():
                     audio_features = audio_features.to('cuda')
                 assert len(audio_features) == 1
-                audio_features = self.wav2vec2_model(**audio_features)['last_hidden_state']
+                if self.audio_feature_layer == 'last_hidden_state':
+                    audio_features = self.wav2vec2_model(**audio_features)['last_hidden_state']
+                elif self.audio_feature_layer == 'last_three_layers':
+                    audio_features = self.wav2vec2_model(**audio_features, output_hidden_states=True)['hidden_states'][-3]
 
                 unpooled_audio = audio_features.cpu().numpy()
                 audio_features_pooled = torch.mean(torch.as_tensor(unpooled_audio), dim=1)

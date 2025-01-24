@@ -7,6 +7,7 @@ def scale(min_v, max_v, new_min, new_max, x):
 def scale_dataset(item, minv=1, maxv=7):
     item['act'] = scale(minv,maxv,-1,1,item['act'])
     item['val'] = scale(minv,maxv,-1,1,item['val'])
-    item['soft_act_labels'] = [scale(minv, maxv, -1, 1, x) for x in item['soft_act_labels']]
-    item['soft_val_labels'] = [scale(minv, maxv, -1, 1, x) for x in item['soft_val_labels']]
+    if 'soft_act_labels' in item:
+        item['soft_act_labels'] = [scale(minv, maxv, -1, 1, x) for x in item['soft_act_labels']]
+        item['soft_val_labels'] = [scale(minv, maxv, -1, 1, x) for x in item['soft_val_labels']]
     return item
