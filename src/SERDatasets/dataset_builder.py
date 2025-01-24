@@ -5,8 +5,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from transformers import Wav2Vec2Processor
-from transformers import AutoTokenizer, AutoModel, Wav2Vec2FeatureExtractor, Wav2Vec2Model
+from transformers import AutoTokenizer, AutoModel, AutoFeatureExtractor, AutoProcessor
 from datasets import load_dataset, concatenate_datasets
 from .podcast import read_podcast
 from .improv import read_improv
@@ -255,11 +254,11 @@ class FeatureGenerator:
             from transformers.utils import logging # Silence warnings as model loads result in repeated warnings per process
             logging.set_verbosity_error() 
             if self.audio_features != 'raw' and self.audio_features != 'mfb' and type(self.audio_features) == str:
-                self.wav2vec2_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(self.audio_features)
-                self.wav2vec2_model = Wav2Vec2Model.from_pretrained(self.audio_features)
+                self.feature_extractor = AutoFeatureExtractor.from_pretrained(self.audio_features)
+                self.transformer_model = AutoModel.from_pretrained(self.audio_features)
                 if torch.cuda.is_available():
-                    self.wav2vec2_model = self.wav2vec2_model.to('cuda')
-                self.wav2vec2_model.eval()
+                    self.transformer_model = self.transformer_model.to('cuda')
+                self.transformer_model.eval()
 
             if self.text_features != 'raw' and type(self.text_features) == str:
                 self.tokenizer = AutoTokenizer.from_pretrained(self.text_features)
@@ -272,14 +271,15 @@ class FeatureGenerator:
             if sample['Audio']['sampling_rate'] != 16000:
                 raise ValueError('Sampling rate should be 16000')
             if len(sample['Audio']['array']):
-                audio_features = self.wav2vec2_feature_extractor(sample['Audio']['array'], sampling_rate=16000, return_tensors='pt')
+                audio_features = self.feature_extractor(sample['Audio']['array'], sampling_rate=16000, return_tensors='pt')
                 if torch.cuda.is_available():
                     audio_features = audio_features.to('cuda')
-                assert len(audio_features) == 1
+                # assert len(audio_features) == 1 
                 if self.audio_feature_layer == 'last_hidden_state':
-                    audio_features = self.wav2vec2_model(**audio_features)['last_hidden_state']
+                    audio_features = self.transformer_model(**audio_features)['last_hidden_state']
                 elif self.audio_feature_layer == 'last_three_layers':
-                    audio_features = self.wav2vec2_model(**audio_features, output_hidden_states=True)['hidden_states'][-3]
+                    # print('output shape:', len(self.transformer_model(**audio_features, output_hidden_states=True)['hidden_states']))
+                    audio_features = self.transformer_model(**audio_features, output_hidden_states=True)['hidden_states'][-3]
 
                 unpooled_audio = audio_features.cpu().numpy()
                 audio_features_pooled = torch.mean(torch.as_tensor(unpooled_audio), dim=1)
@@ -325,10 +325,10 @@ class Collator:
         # labels = torch.stack([labels_act, labels_val], dim=1)
         return {'inputs': inputs, 'text': transcripts, 'dataset_ids': dataset_ids, 'act': labels_act, 'val': labels_val}
 
-def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4):
+def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4, audio_features='facebook/wav2vec2-base'):
     print('Warning -- only use get dataloaders when loading raw audio as it uses a collator assuming padding raw audio')
     train_datasets, dev_datasets, test_datasets = make_audio_datasets(datasets_to_load, kde_size)
-    processor = Wav2Vec2Processor.from_pretrained('facebook/wav2vec2-base')
+    processor = AutoProcessor.from_pretrained('facebook/wav2vec2-base')
     if multidomain_trainining:
         # Train datasets and dev datasets should be merged into one dataset 
         train_dataset = concatenate_datasets(train_datasets.values())
