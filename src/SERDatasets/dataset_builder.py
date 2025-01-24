@@ -294,7 +294,7 @@ class FeatureGenerator:
             out = self.bert_model(**bert_tokens).last_hidden_state
             cls_tok = out.squeeze()[0].cpu()
 
-        sample['Audio'] = audio_features_pooled
+        sample['AudioFeatures'] = audio_features_pooled
         sample['Text'] = cls_tok
         return sample
 
@@ -305,7 +305,7 @@ class Collator:
 
     def __call__(self, batch):
         if not hasattr(self, 'using_cache'):
-            self.using_cache = 'W2V2CachedLayer' in batch[0]
+            self.using_cache = 'AudioFeatures' in batch[0]
         labels_act = [sample['EmoAct'] for sample in batch]
         labels_val = [sample['EmoVal'] for sample in batch]
         transcripts = [sample['Text'] for sample in batch]
@@ -318,12 +318,12 @@ class Collator:
             audios = [torch.nn.functional.pad(a, (0, max_len - len(a))) for a in audios]
             inputs = self.processor(audios, sampling_rate=16000, padding=True, return_tensors='pt').input_values[0]
         else:
-            inputs = torch.nn.utils.rnn.pad_sequence([sample['W2V2CachedLayer'].squeeze() for sample in batch], batch_first=True)
+            inputs = torch.nn.utils.rnn.pad_sequence([sample['AudioFeatures'].squeeze() for sample in batch], batch_first=True)
 
         labels_act = torch.tensor(labels_act)
         labels_val = torch.tensor(labels_val)
         # labels = torch.stack([labels_act, labels_val], dim=1)
-        return inputs, transcripts, dataset_ids, labels_act, labels_val
+        return {'inputs': inputs, 'text': transcripts, 'dataset_ids': dataset_ids, 'act': labels_act, 'val': labels_val}
 
 def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4):
     print('Warning -- only use get dataloaders when loading raw audio as it uses a collator assuming padding raw audio')
