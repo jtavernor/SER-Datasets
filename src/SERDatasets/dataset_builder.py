@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModel, AutoFeatureExtractor, AutoProcessor
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset, concatenate_datasets, Audio
 from .podcast import read_podcast
 from .improv import read_improv
 from .iemocap import read_iemocap
@@ -14,6 +14,7 @@ from .muse import read_muse
 from .config import Config
 from .kde_probability import kde_probability_bs
 from .utils import scale_dataset
+from .feature_generator import generate_features
 
 conf = Config()
 
@@ -66,7 +67,7 @@ def format_datasets(type_to_columns, column_masks, *datasets):
         if len(ds_cols_to_set):
             dataset.set_format(column_type, columns=ds_cols_to_set, output_all_columns=True, **kwargs)
 
-def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'], kde_size=4):
+def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'], kde_size=4, add_enhanced_wavs=False):
     """
     Creates audio datasets for training, development, and testing from labeled audio files.
 
@@ -88,14 +89,16 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     type_to_columns = { # None returns just plain python objects -- use for dictionaries and strings
         None: (np.array(['FileName', 'Split_Set', 'annotators']), {}),
-        'torch': (np.array(['Audio', 'Text', 'act', 'val', 'soft_act_labels', 'soft_val_labels', 'self-report-act', 'self-report-val']), {'dtype': torch.float32, 'device': device})
+        'torch': (np.array(['Audio', 'Text', 'AudioFeatures', 'TextFeatures', 'AudioEnhanced', 'act', 'val', 'soft_act_labels', 'soft_val_labels', 'self-report-act', 'self-report-val']), {'dtype': torch.float32, 'device': device})
     }
     column_masks = {
         None: [True, True, conf['return_annotator_info']],
-        'torch': [True, True, conf['return_activation'], conf['return_valence'], conf['return_activation'] and conf['return_soft_labels'], conf['return_valence'] and conf['return_soft_labels'], conf['return_activation'] and conf['return_self_report'], conf['return_valence'] and conf['return_self_report']]
+        'torch': [True, True, True, True, add_enhanced_wavs, conf['return_activation'], conf['return_valence'], conf['return_activation'] and conf['return_soft_labels'], conf['return_valence'] and conf['return_soft_labels'], conf['return_activation'] and conf['return_self_report'], conf['return_valence'] and conf['return_self_report']]
     }
     # Apply masks along configs to keep only columns where mask is True
     columns = [x for coltype in type_to_columns for x in type_to_columns[coltype][0][column_masks[coltype]]]
+    if 'Dataset' not in columns:
+        columns.append('Dataset')
     print('Using columns:', columns)
     
     train_datasets, dev_datasets, test_datasets = {}, {}, {}
@@ -123,7 +126,7 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
 
     # Remove any datasets that were loaded from cache
     datasets_to_generate = [key for key in datasets_to_load if key not in loaded_keys]
-    if len(datasets_to_generate): # Generate datasets from cache
+    if len(datasets_to_generate): # Generate datasets that were not in cache
         for key in datasets_to_generate:
             # Load labels for each dataset
             train_datasets[key], dev_datasets[key], test_datasets[key] = file_reader[key](dataset_paths[key], label_paths[key], columns=columns)
@@ -135,17 +138,20 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
         # Check that features need to be generated for audio and text 
         audio_features, text_features = conf['audio_feature_type'], conf['text_feature_type']
         feature_generation = audio_features != 'raw' or text_features != 'raw'
-        if feature_generation: # Create an object that can be called for creating features
-            generator = FeatureGenerator(audio_features, text_features, audio_feature_layer=conf['audio_feature_layer'])
+        # if feature_generation: # Create an object that can be called for creating features
+        #     generator = FeatureGenerator(audio_features, text_features, audio_feature_layer=conf['audio_feature_layer'])
 
         # Now create features 
         for key in datasets_to_generate:
             # Calculate audio and text features 
             if feature_generation:
-                processes = 4 #if key != 'podcast' else 1 # Podcast sometimes runs out of memory due to size so use less processes
-                train_datasets[key] = train_datasets[key].map(generator, num_proc=processes)
-                dev_datasets[key] = dev_datasets[key].map(generator, num_proc=processes)
-                test_datasets[key] = test_datasets[key].map(generator, num_proc=processes)
+                audio_feature_layer = conf['audio_feature_layer']
+                base_path = conf['cache_dataset_path']
+                temp_path = os.path.join(base_path, 'temp')
+
+                train_datasets[key] = generate_features(train_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'train')
+                dev_datasets[key] = generate_features(dev_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'dev')
+                test_datasets[key] = generate_features(test_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'test')
 
             # Set the correct format on the dataset -- has to be done prior to calculation of KDE labels
             format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
@@ -172,6 +178,18 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
                 train_datasets[key] = load_dataset('parquet', data_files={'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet')})['train']
                 dev_datasets[key] = load_dataset('parquet', data_files={'dev': os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet')})['dev']
                 test_datasets[key] = load_dataset('parquet', data_files={'test': os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet')})['test']
+
+    if add_enhanced_wavs:
+        print('Datasets loaded, adding enhanced audio paths')
+        for key in datasets_to_load:
+            for ds_type in [train_datasets, dev_datasets, test_datasets]:
+                dataset = ds_type[key]
+                file_names = dataset['FileName']
+                # TODO: should not hardcode just for podcast, this is temporary
+                new_paths = [f'/data/public/data/SpeechEnhancedWavs/MSP-Podcast-1.11/Audios/{file_name}' for file_name in file_names]
+                dataset = dataset.add_column('AudioEnhanced', new_paths)
+                dataset = dataset.cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+                ds_type[key] = dataset.cast_column('AudioEnhanced', Audio(sampling_rate=16000, mono=True))
 
     print('Datasets loaded, filtering on audio length...')
     # Now that datasets are loaded (and possibly cached to disk) apply filtering on audio length
@@ -242,62 +260,6 @@ def create_kde_labels_map(batched_examples, kde_size, num_calculations=1):
         del batched_examples['kde_2d_probability_generation_0']
     return batched_examples
 
-class FeatureGenerator:
-    def __init__(self, audio_features, text_features, audio_feature_layer):
-        self.audio_features = audio_features
-        self.text_features = text_features
-        self.audio_feature_layer = audio_feature_layer
-        self.initialised = False
-
-    def __call__(self, sample):
-        if not self.initialised:
-            from transformers.utils import logging # Silence warnings as model loads result in repeated warnings per process
-            logging.set_verbosity_error() 
-            if self.audio_features != 'raw' and self.audio_features != 'mfb' and type(self.audio_features) == str:
-                self.feature_extractor = AutoFeatureExtractor.from_pretrained(self.audio_features)
-                self.transformer_model = AutoModel.from_pretrained(self.audio_features)
-                if torch.cuda.is_available():
-                    self.transformer_model = self.transformer_model.to('cuda')
-                self.transformer_model.eval()
-
-            if self.text_features != 'raw' and type(self.text_features) == str:
-                self.tokenizer = AutoTokenizer.from_pretrained(self.text_features)
-                self.bert_model = AutoModel.from_pretrained(self.text_features)
-                if torch.cuda.is_available():
-                    self.bert_model = self.bert_model.to('cuda')
-            self.initialised = True
-
-        with torch.no_grad():
-            if sample['Audio']['sampling_rate'] != 16000:
-                raise ValueError('Sampling rate should be 16000')
-            if len(sample['Audio']['array']):
-                audio_features = self.feature_extractor(sample['Audio']['array'], sampling_rate=16000, return_tensors='pt')
-                if torch.cuda.is_available():
-                    audio_features = audio_features.to('cuda')
-                # assert len(audio_features) == 1 
-                if self.audio_feature_layer == 'last_hidden_state':
-                    audio_features = self.transformer_model(**audio_features)['last_hidden_state']
-                elif self.audio_feature_layer == 'last_three_layers':
-                    # print('output shape:', len(self.transformer_model(**audio_features, output_hidden_states=True)['hidden_states']))
-                    audio_features = self.transformer_model(**audio_features, output_hidden_states=True)['hidden_states'][-3]
-
-                unpooled_audio = audio_features.cpu().numpy()
-                audio_features_pooled = torch.mean(torch.as_tensor(unpooled_audio), dim=1)
-                audio_features_pooled = audio_features_pooled.squeeze(dim=0).cpu().numpy()
-            else:
-                print('ERROR: Empty wav file -- returning empty tensor for w2v2 features')
-                audio_features_pooled = torch.tensor([]).squeeze()
-            bert_tokens = self.tokenizer.encode_plus(sample['Text'], add_special_tokens=True, return_tensors='pt')
-            # if torch.cuda.is_available():
-                # bert_tokens = bert_tokens.to('cuda')
-            bert_tokens = bert_tokens.to(self.bert_model.device)
-            out = self.bert_model(**bert_tokens).last_hidden_state
-            cls_tok = out.squeeze()[0].cpu()
-
-        sample['AudioFeatures'] = audio_features_pooled
-        sample['Text'] = cls_tok
-        return sample
-
 class Collator:
     def __init__(self, processor):
         self.processor = processor
@@ -306,8 +268,8 @@ class Collator:
     def __call__(self, batch):
         if not hasattr(self, 'using_cache'):
             self.using_cache = 'AudioFeatures' in batch[0]
-        labels_act = [sample['EmoAct'] for sample in batch]
-        labels_val = [sample['EmoVal'] for sample in batch]
+        labels_act = [sample['act'] for sample in batch]
+        labels_val = [sample['val'] for sample in batch]
         transcripts = [sample['Text'] for sample in batch]
         dataset_ids = [self.dataset_to_id[sample['Dataset']] for sample in batch]
 
@@ -325,10 +287,10 @@ class Collator:
         # labels = torch.stack([labels_act, labels_val], dim=1)
         return {'inputs': inputs, 'text': transcripts, 'dataset_ids': dataset_ids, 'act': labels_act, 'val': labels_val}
 
-def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4, audio_features='facebook/wav2vec2-base'):
+def get_dataloaders(multidomain_trainining=True, datasets_to_load=['podcast', 'improv', 'iemocap', 'muse'], kde_size=4, audio_features='microsoft/wavlm-base-plus'):
     print('Warning -- only use get dataloaders when loading raw audio as it uses a collator assuming padding raw audio')
     train_datasets, dev_datasets, test_datasets = make_audio_datasets(datasets_to_load, kde_size)
-    processor = AutoProcessor.from_pretrained('facebook/wav2vec2-base')
+    processor = AutoProcessor.from_pretrained(audio_features)
     if multidomain_trainining:
         # Train datasets and dev datasets should be merged into one dataset 
         train_dataset = concatenate_datasets(train_datasets.values())
