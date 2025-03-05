@@ -114,6 +114,11 @@ def read_iemocap(dataset_dir, labels_path, columns):
 
     labels_df = pd.DataFrame(labels_dict)
     # labels_df['Audio'] = labels_df['FileName'].apply(lambda x: os.path.join(audio_dir, x))
+    missing = [col for col in columns if col not in labels_df.columns]
+    columns = [col for col in columns if col in labels_df.columns]
+    if len(missing): # TODO: Better way of doing this rather than copying from muse
+        # Missing are due to new columns generated during caching (AudioFeatures) not present in pre-processed dataset
+        print('Warning IEMOCAP returning empty columns for:', missing)
     labels_df = labels_df[columns]
 
     train_df = labels_df[labels_df['Split_Set'] == 'Train']
