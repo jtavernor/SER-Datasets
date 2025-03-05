@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import torch
 import yaml as pyyaml
+import pathlib
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModel, AutoFeatureExtractor, AutoProcessor
@@ -108,6 +109,8 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
 
     # Load datasets from cache
     if conf['cache_datasets']:
+        # Ensure path exists
+        pathlib.Path(conf['cache_dataset_path']).mkdir(parents=True, exist_ok=True)
         loaded_keys = []
         config_path = os.path.join(conf['cache_dataset_path'], 'config_used_for_cache.yaml')
         if os.path.exists(config_path):
