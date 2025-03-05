@@ -3,11 +3,12 @@ import torch
 import pandas as pd
 import numpy as np
 import torch
+import yaml as pyyaml
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from transformers import Wav2Vec2Processor
 from transformers import AutoTokenizer, AutoModel, Wav2Vec2FeatureExtractor, Wav2Vec2Model
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset, concatenate_datasets, Dataset, Audio
 from .podcast import read_podcast
 from .improv import read_improv
 from .iemocap import read_iemocap
@@ -67,7 +68,7 @@ def format_datasets(type_to_columns, column_masks, *datasets):
         if len(ds_cols_to_set):
             dataset.set_format(column_type, columns=ds_cols_to_set, output_all_columns=True, **kwargs)
 
-def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'], kde_size=4):
+def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'], kde_size=4, podcast_version='1.11'):
     """
     Creates audio datasets for training, development, and testing from labeled audio files.
 
@@ -100,10 +101,23 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
     print('Using columns:', columns)
     
     train_datasets, dev_datasets, test_datasets = {}, {}, {}
+    loaded_train_datasets, loaded_dev_datasets, loaded_test_datasets = {}, {}, {}
+    was_change_to_cache = {}
 
     # Load datasets from cache
     if conf['cache_datasets']:
         loaded_keys = []
+        config_path = os.path.join(conf['cache_dataset_path'], 'config_used_for_cache.yaml')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as config_file:
+                old_config = pyyaml.safe_load(config_file)
+        else:
+            old_config = conf
+            with open(config_path, 'w') as config_file:
+                config_file.write(pyyaml.dump(conf))
+
+        config_changed = conf != old_config
+
         for key in datasets_to_load:
             load_paths = {
                 'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet'),
@@ -113,66 +127,150 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
             train_exists = os.path.exists(load_paths['train'])
             dev_exists = os.path.exists(load_paths['dev'])
             test_exists = os.path.exists(load_paths['test'])
-            if all([train_exists, dev_exists, test_exists]):
+            all_exist = all([train_exists, dev_exists, test_exists])
+            if all_exist:
                 # hfdataset = load_dataset('parquet', data_files=load_paths)
-                train_datasets[key] = load_dataset('parquet', data_files={'train': load_paths['train']})['train']
-                dev_datasets[key] = load_dataset('parquet', data_files={'dev': load_paths['dev']})['dev']
-                test_datasets[key] = load_dataset('parquet', data_files={'test': load_paths['test']})['test']
+                loaded_train_datasets[key] = load_dataset('parquet', data_files={'train': load_paths['train']})['train']
+                loaded_dev_datasets[key] = load_dataset('parquet', data_files={'dev': load_paths['dev']})['dev']
+                loaded_test_datasets[key] = load_dataset('parquet', data_files={'test': load_paths['test']})['test']
+                was_change_to_cache[key] = False
                 loaded_keys.append(key)
-            elif any([train_exists, dev_exists, test_exists]):
-                raise IOError(f'Found partial files of dataset. Either remove all files to cause recalculation, or correct paths of missing files. Checked paths: {load_paths}')
+            if (not all_exist and any([train_exists, dev_exists, test_exists])) or config_changed:
+                raise IOError(f'Found partial files of dataset or cached dataset not matching current config settings. Either remove all files to cause recalculation, or correct paths of missing files. Checked paths: {load_paths}')
 
     # Remove any datasets that were loaded from cache
-    datasets_to_generate = [key for key in datasets_to_load if key not in loaded_keys]
-    if len(datasets_to_generate): # Generate datasets from cache
-        for key in datasets_to_generate:
-            # Load labels for each dataset
-            train_datasets[key], dev_datasets[key], test_datasets[key] = file_reader[key](dataset_paths[key], label_paths[key], columns=columns)
-            min_v, max_v = dataset_scale_parameters[key]
-            train_datasets[key] = train_datasets[key].map(lambda x: scale_dataset(x, min_v, max_v), num_proc=8)
-            dev_datasets[key] = dev_datasets[key].map(lambda x: scale_dataset(x, min_v, max_v), num_proc=8)
-            test_datasets[key] = test_datasets[key].map(lambda x: scale_dataset(x, min_v, max_v), num_proc=8)
+    # Rather than caching entire dataset, we instead should verify that all labels have the correct generated features
+    # This allows lightweight changes i.e. to file_reader labels returned (for example maybe adding new speaker labels that were not originally present)
+    # without regenerating the transformer features that are very slow to generate
+    some_datasets_loaded = len(loaded_keys) > 0
+    for key in datasets_to_load:
+        # Load labels for each dataset
+        train_datasets[key], dev_datasets[key], test_datasets[key] = file_reader[key](dataset_paths[key], label_paths[key], columns=columns)
+        min_v, max_v = dataset_scale_parameters[key]
 
-        # Check that features need to be generated for audio and text 
-        audio_features, text_features = conf['audio_feature_type'], conf['text_feature_type']
-        feature_generation = audio_features != 'raw' or text_features != 'raw'
-        if feature_generation: # Create an object that can be called for creating features
-            generator = FeatureGenerator(audio_features, text_features)
+        train_datasets[key] = scale_dataset(train_datasets[key], min_v, max_v)
+        dev_datasets[key] = scale_dataset(dev_datasets[key], min_v, max_v)
+        test_datasets[key] = scale_dataset(test_datasets[key], min_v, max_v)
 
-        # Now create features 
-        for key in datasets_to_generate:
-            # Calculate audio and text features 
-            if feature_generation:
-                processes = 4 #if key != 'podcast' else 1 # Podcast sometimes runs out of memory due to size so use less processes
-                train_datasets[key] = train_datasets[key].map(generator, num_proc=processes)
-                dev_datasets[key] = dev_datasets[key].map(generator, num_proc=processes)
-                test_datasets[key] = test_datasets[key].map(generator, num_proc=processes)
+    # Now remove any extra samples in the loaded dataset
+    paired_iterator = [(loaded_train_datasets, train_datasets), (loaded_dev_datasets, dev_datasets), (loaded_test_datasets, test_datasets)]
+    if some_datasets_loaded:
+        # Since all datasets were loaded we should quickly check if feature generation is required at all by checking if the datasets loaded from cache all had a feature
+        for key in loaded_keys:
+            extra_count = 0
+            for loaded_data, new_data in paired_iterator:
+                loaded_filenames = set(loaded_data[key]['FileName'])
+                new_filenames = set(new_data[key]['FileName'])
+                extra_data = loaded_filenames - new_filenames
+                extra_count += len(extra_data)
+                loaded_data[key] = loaded_data[key].select([i for i, fname in enumerate(loaded_data[key]['FileName']) if fname not in extra_data])
 
-            # Set the correct format on the dataset -- has to be done prior to calculation of KDE labels
-            format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
+            print(f'{extra_count} Extra files removed for {key}')
 
-            # Calculate KDE 2D labels
-            if conf['calculate_kde']:
-                train_datasets[key] = train_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
-                dev_datasets[key] = dev_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
-                test_datasets[key] = test_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
-            
-            for types, typeg in [('train', train_datasets), ('val', dev_datasets), ('test', test_datasets)]:
-                print(key, types, 'Activation min and max:', min(typeg[key]['act']), max(typeg[key]['act']))
-                print(key, types, 'Valence min and max:', min(typeg[key]['val']), max(typeg[key]['val']))
 
-            # Store datasets            
-            if conf['cache_datasets']:
-                train_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet'))
-                dev_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet'))
-                test_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet'))
+    # Now overwrite the lightweight labels in the loaded datasets if they were loaded
+    for key in loaded_keys:
+        for loaded_data, new_data in paired_iterator:
+            order = loaded_data[key]['FileName']
+            ordered_train = new_data[key].set_index('FileName').loc[order].reset_index()
+            print(ordered_train.columns)
+            for column in ordered_train.columns:
+                if column in ['FileName', 'Audio', 'Text']:
+                    continue
+                old_column = loaded_data[key][column]
+                if column in loaded_data[key].column_names:
+                    loaded_data[key] = loaded_data[key].remove_columns(column)
+                loaded_data[key] = loaded_data[key].add_column(column, ordered_train[column])
+                if old_column != loaded_data[key][column]:
+                    was_change_to_cache[key] = True
+                    print('Data changed for', key, column)
 
-                # For some reason after storing datasets to disk the below audio filtering will hang indefinitely
-                # not sure if the underlying huggingface code is trying to write later changes to disk as well 
-                # so we just reload these datasets immediately to resolve this problem 
-                train_datasets[key] = load_dataset('parquet', data_files={'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet')})['train']
-                dev_datasets[key] = load_dataset('parquet', data_files={'dev': os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet')})['dev']
-                test_datasets[key] = load_dataset('parquet', data_files={'test': os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet')})['test']
+    # Check that features need to be generated for audio and text 
+    audio_features, text_features = conf['audio_feature_type'], conf['text_feature_type']
+    if some_datasets_loaded:
+        # Since all datasets were loaded we should quickly check if feature generation is required at all by checking if the datasets loaded from cache all had a feature
+        for key in loaded_keys:
+            missing_count = 0
+            for loaded_data, new_data in paired_iterator:
+                loaded_filenames = set(loaded_data[key]['FileName'])
+                new_filenames = set(new_data[key]['FileName'])
+                missing_data = new_filenames - loaded_filenames
+                missing_count += len(missing_data)
+                new_data[key] = new_data[key][new_data[key]['FileName'].isin(missing_data)]
+
+            print(f'{missing_count} Files need audio features generating for {key}')
+
+    # Now, for any keys that were *not* loaded convert to huggingface datasets
+    # Datasets that were loaded will already be huggingface datasets that have had the lightweight labels overwritten
+    datasets_to_generate_features = []
+    for key in datasets_to_load:
+        if len(train_datasets[key]) or len(dev_datasets[key]) or len(test_datasets[key]):
+            print('converting to hf dataset', key)
+            train_datasets[key] = Dataset.from_pandas(train_datasets[key]).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+            dev_datasets[key] = Dataset.from_pandas(dev_datasets[key]).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+            test_datasets[key] = Dataset.from_pandas(test_datasets[key]).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+            datasets_to_generate_features.append(key)
+            was_change_to_cache[key] = True
+        else:
+            # Remove any datasets that don't need any new features as the loaded dataset is sufficient
+            del train_datasets[key], dev_datasets[key], test_datasets[key]
+
+    feature_generation = len(datasets_to_generate_features) and (audio_features != 'raw' or text_features != 'raw')
+    if feature_generation: # Create an object that can be called for creating features
+        generator = FeatureGenerator(audio_features, text_features)
+
+    # Now create features 
+    for key in datasets_to_generate_features:
+        # Calculate audio and text features 
+        if feature_generation:
+            processes = 4 #if key != 'podcast' else 1 # Podcast sometimes runs out of memory due to size so use less processes
+            train_datasets[key] = train_datasets[key].map(generator, num_proc=processes)
+            dev_datasets[key] = dev_datasets[key].map(generator, num_proc=processes)
+            test_datasets[key] = test_datasets[key].map(generator, num_proc=processes)
+
+        # Set the correct format on the dataset -- has to be done prior to calculation of KDE labels
+        format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
+
+        # Calculate KDE 2D labels
+        if conf['calculate_kde']:
+            train_datasets[key] = train_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
+            dev_datasets[key] = dev_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
+            test_datasets[key] = test_datasets[key].map(lambda x: create_kde_labels_map(x, kde_size=kde_size, num_calculations=conf['num_kde_calculations']), batched=True, batch_size=256)
+
+        # If datasets were partially loaded previously then now concatenate the new values to the old values
+        if key in loaded_keys:
+            train_datasets[key] = concatenate_datasets([loaded_train_datasets[key], train_datasets[key]])
+            dev_datasets[key] = concatenate_datasets([loaded_dev_datasets[key], dev_datasets[key]])
+            test_datasets[key] = concatenate_datasets([loaded_test_datasets[key], test_datasets[key]])
+
+    # Now insert the updated datasets into the loaded datasets dictionary
+    for key in datasets_to_generate_features:
+        loaded_train_datasets[key] = train_datasets[key]
+        loaded_dev_datasets[key] = dev_datasets[key]
+        loaded_test_datasets[key] = test_datasets[key]
+
+    # Now complete updated datasets are in the loaded datasets dictionary, overwrite the return dictionary with the new updated ones 
+    train_datasets = loaded_train_datasets
+    dev_datasets = loaded_dev_datasets
+    test_datasets = loaded_test_datasets
+    for types, typeg in [('train', train_datasets), ('val', dev_datasets), ('test', test_datasets)]:
+        print(key, types, 'Activation min and max:', min(typeg[key]['act']), max(typeg[key]['act']))
+        print(key, types, 'Valence min and max:', min(typeg[key]['val']), max(typeg[key]['val']))
+
+    # Now save any new changes to dataset
+    for key in datasets_to_load:
+        # Store datasets
+        if conf['cache_datasets'] and was_change_to_cache[key]:
+            train_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet'))
+            dev_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet'))
+            test_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet'))
+
+            # For some reason after storing datasets to disk the below audio filtering will hang indefinitely
+            # not sure if the underlying huggingface code is trying to write later changes to disk as well 
+            # so we just reload these datasets immediately to resolve this problem 
+            train_datasets[key] = load_dataset('parquet', data_files={'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet')})['train']
+            dev_datasets[key] = load_dataset('parquet', data_files={'dev': os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet')})['dev']
+            test_datasets[key] = load_dataset('parquet', data_files={'test': os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet')})['test']
 
     print('Datasets loaded, filtering on audio length...')
     # Now that datasets are loaded (and possibly cached to disk) apply filtering on audio length

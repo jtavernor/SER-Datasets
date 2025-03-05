@@ -120,8 +120,4 @@ def read_iemocap(dataset_dir, labels_path, columns):
     dev_df = labels_df[labels_df['Split_Set'] == 'Validation']
     test_df = labels_df[labels_df['Split_Set'] == 'Test']
 
-    train_dataset = Dataset.from_pandas(train_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    dev_dataset = Dataset.from_pandas(dev_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-    test_dataset = Dataset.from_pandas(test_df).cast_column('Audio', Audio(sampling_rate=16000, mono=True))
-
-    return train_dataset, dev_dataset, test_dataset
+    return train_df, dev_df, test_df
