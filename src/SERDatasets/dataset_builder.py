@@ -87,6 +87,8 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
         dev_dataset: A huggingface Dataset object containing the development data.
         test_dataset: A huggingface Dataset object containing the testing data.
     """
+    # Update file_reader to function for requested podcast version
+    file_reader['podcast'] = lambda *args, **kwargs: read_podcast(*args, **kwargs, podcast_v=podcast_version)
     # First load config and calculate which columns will be used based on the config file 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     type_to_columns = { # None returns just plain python objects -- use for dictionaries and strings
@@ -124,20 +126,34 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
         config_changed = conf != old_config
 
         for key in datasets_to_load:
+            podcast_v_str = f'v{podcast_version}' if podcast_version != '1.11' and key == 'podcast' else ''
             load_paths = {
-                'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet'),
-                'dev': os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet'),
-                'test': os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet'),
+                'train': os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_train.parquet'),
+                'dev': os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_dev.parquet'),
+                'test': os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_test.parquet'),
             }
             train_exists = os.path.exists(load_paths['train'])
             dev_exists = os.path.exists(load_paths['dev'])
             test_exists = os.path.exists(load_paths['test'])
             all_exist = all([train_exists, dev_exists, test_exists])
+            if key == 'podcast' and podcast_version != '1.11' and not all_exist:
+                # Since the requested version of podcast doesnt exist, check if 1.11 exists as this can be used to prevent recalculating the majority of values
+                load_paths = {
+                    'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet'),
+                    'dev': os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet'),
+                    'test': os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet'),
+                }
+                train_exists = os.path.exists(load_paths['train'])
+                dev_exists = os.path.exists(load_paths['dev'])
+                test_exists = os.path.exists(load_paths['test'])
+                all_exist = all([train_exists, dev_exists, test_exists])
+
             if all_exist:
                 # hfdataset = load_dataset('parquet', data_files=load_paths)
                 loaded_train_datasets[key] = load_dataset('parquet', data_files={'train': load_paths['train']})['train']
                 loaded_dev_datasets[key] = load_dataset('parquet', data_files={'dev': load_paths['dev']})['dev']
                 loaded_test_datasets[key] = load_dataset('parquet', data_files={'test': load_paths['test']})['test']
+                # print(f'Loaded from cache train:{len(loaded_train_datasets[key])} dev:{len(loaded_dev_datasets[key])} test:{len(loaded_test_datasets[key])}')
                 was_change_to_cache[key] = False
                 loaded_keys.append(key)
             if (not all_exist and any([train_exists, dev_exists, test_exists])) or config_changed:
@@ -151,6 +167,7 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
     for key in datasets_to_load:
         # Load labels for each dataset
         train_datasets[key], dev_datasets[key], test_datasets[key] = file_reader[key](dataset_paths[key], label_paths[key], columns=columns)
+        # print(f'Read train:{len(train_datasets[key])} dev:{len(dev_datasets[key])} test:{len(test_datasets[key])}')
         min_v, max_v = dataset_scale_parameters[key]
 
         train_datasets[key] = scale_dataset(train_datasets[key], min_v, max_v)
@@ -230,10 +247,12 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
             audio_feature_layer = conf['audio_feature_layer']
             base_path = conf['cache_dataset_path']
             temp_path = os.path.join(base_path, 'temp')
-
-            train_datasets[key] = generate_features(train_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'train')
-            dev_datasets[key] = generate_features(dev_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'dev')
-            test_datasets[key] = generate_features(test_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'test')
+            if len(train_datasets[key]):
+                train_datasets[key] = generate_features(train_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'train')
+            if len(dev_datasets[key]):
+                dev_datasets[key] = generate_features(dev_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'dev')
+            if len(test_datasets[key]):
+                test_datasets[key] = generate_features(test_datasets[key], key, audio_features, text_features, audio_feature_layer, temp_path, 'test')
 
         # Set the correct format on the dataset -- has to be done prior to calculation of KDE labels
         format_datasets(type_to_columns, column_masks, train_datasets[key], dev_datasets[key], test_datasets[key])
@@ -261,23 +280,26 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
     dev_datasets = loaded_dev_datasets
     test_datasets = loaded_test_datasets
     for types, typeg in [('train', train_datasets), ('val', dev_datasets), ('test', test_datasets)]:
-        print(key, types, 'Activation min and max:', min(typeg[key]['act']), max(typeg[key]['act']))
-        print(key, types, 'Valence min and max:', min(typeg[key]['val']), max(typeg[key]['val']))
+        if len(typeg[key]['act']):
+            print(key, types, 'Activation min and max:', min(typeg[key]['act']), max(typeg[key]['act']))
+        if len(typeg[key]['val']):
+            print(key, types, 'Valence min and max:', min(typeg[key]['val']), max(typeg[key]['val']))
 
     # Now save any new changes to dataset
     for key in datasets_to_load:
         # Store datasets
         if conf['cache_datasets'] and was_change_to_cache[key]:
-            train_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet'))
-            dev_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet'))
-            test_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet'))
+            podcast_v_str = f'v{podcast_version}' if podcast_version != '1.11' and key == 'podcast' else ''
+            train_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_train.parquet'))
+            dev_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_dev.parquet'))
+            test_datasets[key].to_parquet(os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_test.parquet'))
 
             # For some reason after storing datasets to disk the below audio filtering will hang indefinitely
             # not sure if the underlying huggingface code is trying to write later changes to disk as well 
             # so we just reload these datasets immediately to resolve this problem 
-            train_datasets[key] = load_dataset('parquet', data_files={'train': os.path.join(conf['cache_dataset_path'], f'{key}_train.parquet')})['train']
-            dev_datasets[key] = load_dataset('parquet', data_files={'dev': os.path.join(conf['cache_dataset_path'], f'{key}_dev.parquet')})['dev']
-            test_datasets[key] = load_dataset('parquet', data_files={'test': os.path.join(conf['cache_dataset_path'], f'{key}_test.parquet')})['test']
+            train_datasets[key] = load_dataset('parquet', data_files={'train': os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_train.parquet')})['train']
+            dev_datasets[key] = load_dataset('parquet', data_files={'dev': os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_dev.parquet')})['dev']
+            test_datasets[key] = load_dataset('parquet', data_files={'test': os.path.join(conf['cache_dataset_path'], f'{key}{podcast_v_str}_test.parquet')})['test']
 
     if add_enhanced_wavs:
         print('Datasets loaded, adding enhanced audio paths')
@@ -296,7 +318,7 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
     # Load csv containing audio lengths for all utterances in each dataset
     len_csv_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'audiolengths.csv')
     if os.path.exists(len_csv_path):
-        lengths = pd.read_csv(len_csv_path)
+        lengths = pd.read_csv(len_csv_path, index_col=0)
     else: # If audio length csv doesn't exist then create it
         print('Concatenating datasets to calculate audio lengths and generate audiolengths.csv for filtering')
         lengths = concatenate_datasets(list(train_datasets.values()) + list(dev_datasets.values()) + list(test_datasets.values()))
@@ -326,11 +348,30 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
         lengths = dataset_lengths.loc[x['FileName']]['AudioLength']
         not_too_short = min_audio_len <= lengths
         not_too_long = lengths <= max_audio_len
-        audio_exists = lengths > 0 
+        audio_exists = lengths > 0
         return np.logical_and(np.logical_and(not_too_long, not_too_short), audio_exists)
 
     for key in datasets_to_load:
         dataset_lengths = lengths_by_dataset[key]
+        missing_lengths = set(train_datasets[key]['FileName']) | set(dev_datasets[key]['FileName']) | set(test_datasets[key]['FileName'])
+        missing_lengths -= set(dataset_lengths.index)
+        if len(missing_lengths):
+            print(f'Missing samples: {len(missing_lengths)}')
+            lengths_new = concatenate_datasets(list(train_datasets.values()) + list(dev_datasets.values()) + list(test_datasets.values()))
+            lengths_new = lengths_new.select([i for i, x in enumerate(lengths_new['FileName']) if x in missing_lengths])
+            lengths_new = lengths_new.cast_column('Audio', Audio(sampling_rate=16000, mono=True))
+            lengths_new = lengths_new.map(add_length, num_proc=16).to_pandas()
+            lengths_new = lengths_new[['Dataset', 'FileName', 'AudioLength']]
+            lengths = pd.concat([lengths, lengths_new], axis=0, ignore_index=True)
+            lengths.to_csv(len_csv_path)
+            lengths_by_dataset = {
+                'podcast': lengths[lengths['Dataset'] == 'MSP-Podcast'].set_index('FileName'),
+                'improv': lengths[lengths['Dataset'] == 'MSP-Improv'].set_index('FileName'),
+                'muse': lengths[lengths['Dataset'] == 'MuSE'].set_index('FileName'),
+                'iemocap': lengths[lengths['Dataset'] == 'IEMOCAP'].set_index('FileName'),
+            }
+            dataset_lengths = lengths_by_dataset[key]
+
         # Remove samples not in the min/max audio length
         train_datasets[key] = train_datasets[key].filter(filter_len, batched=True)
         dev_datasets[key] = dev_datasets[key].filter(filter_len, batched=True)
