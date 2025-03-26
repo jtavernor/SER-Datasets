@@ -119,7 +119,7 @@ def read_podcast(dataset_dir, labels_path, columns, podcast_v='1.11'):
     labels = labels[columns]
 
     train_df = labels[labels['Split_Set'] == 'Train']
-    if 'Development' in labels['Split_Set']:
+    if ('Development' == labels['Split_Set']).any():
         dev_df = labels[labels['Split_Set'] == 'Development']
     else:
         # print(labels['Split_Set'].unique())
