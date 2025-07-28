@@ -17,7 +17,7 @@ from .iemocap import read_iemocap
 from .muse import read_muse
 from .config import Config
 from .kde_probability import kde_probability_bs
-from .utils import scale_dataset, prune_annotators_fn, add_muse_annotators_NO_SELF_REPORT
+from .utils import scale_dataset, prune_annotators_fn, add_muse_annotators_NO_SELF_REPORT, add_muse_annotators
 from .feature_generator import generate_features
 
 conf = Config()
@@ -170,7 +170,10 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
         # Load labels for each dataset
         train_datasets[key], dev_datasets[key], test_datasets[key] = file_reader[key](dataset_paths[key], label_paths[key], columns=columns)
         if key == 'muse':
-            train_datasets[key], dev_datasets[key], test_datasets[key] = add_muse_annotators_NO_SELF_REPORT(train_datasets[key], dev_datasets[key], test_datasets[key])
+            if conf['return_self_report']:
+                train_datasets[key], dev_datasets[key], test_datasets[key] = add_muse_annotators(train_datasets[key], dev_datasets[key], test_datasets[key])
+            else:
+                train_datasets[key], dev_datasets[key], test_datasets[key] = add_muse_annotators_NO_SELF_REPORT(train_datasets[key], dev_datasets[key], test_datasets[key])
         # print(f'Read train:{len(train_datasets[key])} dev:{len(dev_datasets[key])} test:{len(test_datasets[key])}')
         min_v, max_v = dataset_scale_parameters[key]
 

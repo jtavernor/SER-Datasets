@@ -88,6 +88,18 @@ def prune_annotators_fn(train_dataset, val_dataset, test_dataset, min_n):
     return pruned_train, pruned_val, pruned_test
 
 def add_muse_annotators_NO_SELF_REPORT(train_dataset, val_dataset, test_dataset):
+    train_dataset, val_dataset, test_dataset = add_muse_helper(train_dataset, val_dataset, test_dataset, drop_last=False)
+
+    all_ann = [a for ann in train_dataset['annotators'].to_list() + val_dataset['annotators'].to_list() + test_dataset['annotators'].to_list() for a in ann]
+    if any([a.startswith('self-report') for a in all_ann]):
+        raise ValueError('Failed to remove self report')
+
+    return train_dataset, val_dataset, test_dataset
+
+def add_muse_annotators(train_dataset, val_dataset, test_dataset):
+    return add_muse_helper(train_dataset, val_dataset, test_dataset, drop_last=False)
+
+def add_muse_helper(train_dataset, val_dataset, test_dataset, drop_last):
     muse_annotator_info_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'muse_annotators.csv')
     muse_ann_df = pd.read_csv(muse_annotator_info_path)
     muse_ann_df = muse_ann_df.set_index('FileName')
@@ -96,9 +108,14 @@ def add_muse_annotators_NO_SELF_REPORT(train_dataset, val_dataset, test_dataset)
     muse_ann_df.annotators = muse_ann_df.annotators.apply(lambda s: [x.strip(' []\'') for x in s.split(',')])
     def convert_dataset(sample):
         new_values = muse_ann_df.loc[sample['FileName']].to_dict()
-        sample['soft_act_labels'] = new_values['soft_act_labels'][:-1]
-        sample['soft_val_labels'] = new_values['soft_val_labels'][:-1]
-        sample['annotators'] = new_values['annotators'][:-1]
+        if drop_last:
+            sample['soft_act_labels'] = new_values['soft_act_labels'][:-1]
+            sample['soft_val_labels'] = new_values['soft_val_labels'][:-1]
+            sample['annotators'] = new_values['annotators'][:-1]
+        else:
+            sample['soft_act_labels'] = new_values['soft_act_labels']
+            sample['soft_val_labels'] = new_values['soft_val_labels']
+            sample['annotators'] = new_values['annotators']
         sample['act'] = np.mean(sample['soft_act_labels'])
         sample['val'] = np.mean(sample['soft_val_labels'])
         return sample
@@ -106,8 +123,5 @@ def add_muse_annotators_NO_SELF_REPORT(train_dataset, val_dataset, test_dataset)
     train_dataset = train_dataset.apply(convert_dataset, axis=1)
     val_dataset = val_dataset.apply(convert_dataset, axis=1)
     test_dataset = test_dataset.apply(convert_dataset, axis=1)
-    all_ann = [a for ann in train_dataset['annotators'].to_list() + val_dataset['annotators'].to_list() + test_dataset['annotators'].to_list() for a in ann]
-    if any([a.startswith('self-report') for a in all_ann]):
-        raise ValueError('Failed to remove self report')
 
     return train_dataset, val_dataset, test_dataset
