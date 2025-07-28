@@ -402,15 +402,26 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
                     return int(session)-1 # Session will be 0-4 then 
                 sessions = [iemocap_map_to_session(fname) for fname in all_file_names]
                 groups = sessions
+                if conf['return_self_report']:
+                    raise ValueError('Not yet supported to do self-report cross-validation on IEMOCAP')
             else:
                 # Create 5 random SPEAKER INDEPENDENT splits for muse and improv 
                 if key == 'improv':
                     # Calculate the speakers from improv
                     utterance_matcher = re.compile(r'MSP-IMPROV-S(?P<sentence>\d\d)(?P<intended_emotion>[AHSN])-(?P<speaker>(?P<gender>[MF])\d\d)-(?P<scenario>[PRST])-(?P<listener>[FM])(?P<dyadic_speaker>[FM])(?P<turn_number>\d\d)')
                     speakers = [utterance_matcher.match(fname.replace('.wav', '')).group('speaker') for fname in all_file_names]
+                    if conf['return_self_report']:
+                        raise ValueError('Self report not supported for MSP-Improv')
                 elif key == 'muse':
                     # Calculate the speakers from MuSE
-                    speakers = [fname[:2] for fname in all_file_names]
+                    if conf['return_self_report']:
+                        # The file naming is: SubjectID_(Audio_File_ID)_(Monologue_Number*2-1)
+                        # We want to make the folds monologue-independent and speaker-dependent
+                        get_monologue = lambda fname: '_'.join(fname.split('_')[1:-2])
+                        speakers = [get_monologue(fname) for fname in all_file_names]
+                    else:
+                        speakers = [fname[:2] for fname in all_file_names]
+
                 groups = speakers
             group_k_fold = GroupKFold(n_splits=5) # Group k fold is not randomised so no need to worry about reproducibility here 
             all_file_names = np.array(all_file_names)
@@ -435,6 +446,11 @@ def make_audio_datasets(datasets_to_load=['improv', 'iemocap', 'muse', 'podcast'
                 # Assert all samples are used 
                 assert len(test_fnames) + len(val_fnames) + len(train_fnames) == len(full_dataset)
                 print(f'Fold {i} group info:\n\t{train_groups=}\n\t\tNum train samples:{len(train_fnames)}\n\t{val_groups=}\n\t\tNum val samples:{len(val_fnames)}\n\t{test_groups=}\n\t\tNum test samples:{len(test_fnames)}')
+                if key == 'muse' and conf['return_self_report']:
+                    tr = set([fname[:2] for fname in test_fnames])
+                    va = set([fname[:2] for fname in test_fnames])
+                    te = set([fname[:2] for fname in test_fnames])
+                    print(f'Fold {i} speaker info:\n\t{tr=}\n\t\tNum train samples:{len(tr)}\n\t{va=}\n\t\tNum val samples:{len(va)}\n\t{te=}\n\t\tNum test samples:{len(te)}')
                 train_fold = full_dataset.filter(lambda x: x['FileName'] in train_fnames)
                 val_fold = full_dataset.filter(lambda x: x['FileName'] in val_fnames)
                 test_fold = full_dataset.filter(lambda x: x['FileName'] in test_fnames)
